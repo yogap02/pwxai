@@ -21,6 +21,7 @@ import { rehydrate, toRepoRelative, isRepoRelativePosix, assertRepoRelativePosix
 import { parseBlock, parseScenarioFile, hash } from '../core/scenario/parser.js';
 import { renderManagedRegion, readManagedRegion, upsertManagedRegion, scaffoldManagedSpec, mergeManagedRegion, stripBlockImports, blockViolations, MANAGED_START, MANAGED_END, type ManagedBlock } from '../core/scenario/managed-region.js';
 import { blockCompileErrors, blockSpans, parseTscErrors } from '../core/scenario/compile-guard.js';
+import { capabilityGate } from '../ai/classifier.js';
 import { repairTruncatedJson, extractJson } from '../ai/model-client.js';
 import { substitute } from '../ai/prompts/load.js';
 import { planTier } from '../planning/planner.js';
@@ -437,6 +438,54 @@ check('a viewport scenario without the capability becomes a work order, not a gr
   const src = stripComments(await readFile(rehydrate('src/stages/02-testcase-digest.ts'), 'utf8'));
   assert(/viewportCapabilityGap\(/.test(src), 'stage 2 must gate on the viewport capability');
   assert(/viewportProfileIn\(/.test(src), 'stage 2 must read the profile from the scenario');
+});
+
+check('a scenario the page object cannot express is blocked, even when no member is named', async () => {
+  // Gate 2 is enforced in code against the real surface, not trusted from the model's own
+  // `pomCanExpress` — but it only ever inspected the members the model LISTED, and the honest
+  // answer for behaviour that lives outside the page (a CI workflow, a deploy script, a docs
+  // invariant) is `pomCanExpress: false` with nothing to list: there is no member to invent.
+  // `missing` then came back empty by construction, the scenario read as `novel`, and stage 2
+  // generated a block that could not touch the thing the scenario was about — held as a passing
+  // test on every run after it. Eight of them landed on the first product-triggered run, for a
+  // deploy-config change, under `Needs attention — Nothing`.
+  const has = (member: string): boolean => ['goto', 'expectSiteTitle'].includes(member);
+  const base = { alreadyCovered: false, reason: 'looks novel' };
+
+  assert(
+    capabilityGate({ ...base, pomCanExpress: true, membersUsed: ['goto', 'expectSiteTitle'] }, has).kind === 'novel',
+    'a yes that names members it has is novel, and generates',
+  );
+  assert(
+    capabilityGate({ ...base, pomCanExpress: true, membersUsed: ['expectCiRan'] }, has).kind === 'blocked',
+    'a named member the page object does not have blocks, naming it',
+  );
+
+  const inexpressible = capabilityGate({ ...base, pomCanExpress: false, membersUsed: [] }, has);
+  assert(
+    inexpressible.kind === 'blocked',
+    'a "cannot express it" with nothing named still blocks — nothing to name IS the answer for a CI-only scenario',
+  );
+  assert(
+    inexpressible.kind === 'blocked' && inexpressible.missingCapabilities.length > 0,
+    'and the work order must name what to add, or stage 4 is told to add nothing',
+  );
+  assert(
+    capabilityGate({ ...base, pomCanExpress: true, membersUsed: [] }, has).kind === 'blocked',
+    'a novel verdict naming no member cannot become a block that asserts anything',
+  );
+  assert(
+    capabilityGate({ ...base, alreadyCovered: true, pomCanExpress: false, membersUsed: [] }, has).kind === 'covered',
+    'coverage is gate 1 and still short-circuits',
+  );
+
+  // And the classifier must route through it, or the gate is knowledge nothing applies.
+  const gateSrc = stripComments(await readFile(rehydrate('src/ai/classifier.ts'), 'utf8'));
+  assert(/capabilityGate\(/.test(gateSrc), 'the classifier must decide through capabilityGate');
+  assert(
+    /empty membersUsed/.test(gateSrc),
+    'and the prompt must ask for the missing assertion by name, so the work order can name it',
+  );
 });
 
 check('a spec never calls the Playwright page API directly', async () => {

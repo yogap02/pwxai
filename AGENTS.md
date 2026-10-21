@@ -244,6 +244,19 @@ gh workflow run test-pipeline -f from_scenarios=true   # start a run by hand, no
   a signature there would make every claimed capability look like a missing one. A param list is
   captured only when it is unambiguously one (no nested parens, no quotes), because a *wrong* hint is
   worse than none — the model will satisfy it exactly.
+- **A capability verdict of "no" blocks, even when the model names nothing.** Gate 2 is enforced in
+  code against the real surface rather than trusted from the model's own `pomCanExpress`, but it only
+  ever inspected the members the model *listed* — and the honest answer for behaviour that lives
+  outside the page (a CI workflow, a deploy script, a docs invariant) is `false` with **nothing to
+  list**: there is no member to invent. `missing` therefore came back empty by construction, the
+  scenario read as `novel`, and stage 2 generated a block that could not touch the thing the scenario
+  was about and held it as a passing test on every run after. Eight of them landed on the first
+  product-triggered run — a deploy-config change on the product repo — under `Needs attention —
+  Nothing`. `capabilityGate` (`src/ai/classifier.ts`) now blocks on `pomCanExpress: false` *and* on a
+  `novel` verdict that names no member at all, since a block that calls no member asserts nothing; it
+  names the gap so stage 4 has a work order, the prompt asks for the missing assertion by name, and
+  the decision is pure and driven by synthetic answers in self-checks — the easy thing to get wrong is
+  the emptiness of a list.
 - **The manifest round-trips, and holds no `Map`**: a `Map` handed to `JSON.stringify` becomes `{}`
   with no error, so one left in the manifest silently empties the digest. The manifest therefore
   stores plain arrays/objects only — `scenarios[]` rows carry `verdict` + `reason` — and a
