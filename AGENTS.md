@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Product-neutral boilerplate implementing an 8-stage AI test pipeline on Playwright 1.63
+Product-neutral boilerplate implementing a 9-stage AI test pipeline on Playwright 1.63
 (issue + diff → coverage gaps → plain-English scenarios → specs → page objects → run →
 locator heals → PR). Copied per product, never published as a package.
 
@@ -8,7 +8,7 @@ Source-of-truth docs to read before changing behaviour:
 - `pipeline-pattern.md` — the design decisions this code enforces. The "why" for every invariant.
 - `PLAN.md` — multi-session build plan + status. Authoritative for intent, but its detailed
   directory listing is partly aspirational (e.g. there is no `src/delivery/issue-tracker.ts`).
-- `README.md` — layout, the 8-stage failure table, and the adoption checklist.
+- `README.md` — layout, the 9-stage failure table, and the adoption checklist.
 
 ## Commands
 
@@ -20,15 +20,15 @@ npm run typecheck               # tsc --noEmit, strict — the only static gate
 npm run self-checks             # plain-assertion invariants (71 today), no browser, seconds
 npm test                        # playwright; needs a live BASE_URL
 npm run test:list               # enumerate specs without running
-npm run pipeline -- --pr 123    # full 8 stages against PR #123
-npm run stage:<n>               # re-run ONE stage against the last manifest (1-8)
+npm run pipeline -- --pr 123    # full 9 stages against PR #123
+npm run stage:<n>               # re-run ONE stage against the last manifest (1-9)
 npm run stage -- <n|name>       # e.g. `-- 3 --domain landing-page`; `stage` alone prints usage
 gh workflow run test-pipeline -f from_scenarios=true   # start a run by hand, no PR needed
 ```
 
 - `npm run stage:<n>` is the debug handle: it reuses `artifacts/run/manifest.json` instead of
-  paying for all 8 stages. Stages 1/2 start a manifest; 3–8 consume it and refuse to guess when
-  it is missing. `--dry-run` marks stages 6/8 skipped.
+  paying for all 9 stages. Stages 1/2 start a manifest; 3–9 consume it and refuse to guess when
+  it is missing. `--dry-run` marks stages 6/8/9 skipped.
 
 - The workflow also has a **manual trigger** (`workflow_dispatch`): inputs `pr`, `from_scenarios`,
   `dry_run`, `test_grep`, `base_branch`. A manual run has no PR context, so `--pr` is optional and
@@ -129,6 +129,23 @@ gh workflow run test-pipeline -f from_scenarios=true   # start a run by hand, no
   reachable. Its scope lines come from `scopeCoverageLines` (`run-summary.ts`), never a second copy
   of the tier→tag rules: a PR body that quietly disagrees with the summary is the same silent
   smaller-green in a different medium.
+- **The report channel is a second reader of the same run, and it is `fatal: false` but never
+  quiet.** Stage 9 `notify` posts the result to a chat (`TELEGRAM_API_KEY` / `TELEGRAM_CHAT_ID`,
+  registered at the usual three points). A chat message is not evidence, so the run's results stand
+  whatever the channel does — but a send that was rejected or never arrived **throws**, failing the
+  stage and putting it under "Needs attention", because returning a string would report a *succeeded*
+  stage for a report nobody received. No channel configured is the opposite case, and it is the
+  stage's *output*: unset is a legitimate setup, not a defect. The message reuses the summary's own
+  `scopeCoverageLines`, for the reason the PR body does — `6 passed` on a phone, with no scope
+  attached, is the same smaller green in another medium — and it is composed in markdown and
+  converted once, escaping first: Telegram's MarkdownV2 needs every `-`, `.` and `)` in a scenario
+  title escaped, and one miss loses the whole report to a 400, where HTML needs three characters.
+  The token is a secret that appears nowhere but the request — never logged, never in a thrown
+  message, never in the run report, with its URL and its shape added to `redaction.ts` as a
+  backstop, and a transport failure reports the error's *name* rather than its message, which can
+  carry the URL. It runs last because it reports what stage 8 delivered, and it is reachable as
+  `npm run stage:9`: re-sending a report is a real operation, and it reuses the manifest on disk
+  instead of re-running a suite.
 - **The change under test and the repo that works are two things, and were one.** `WORK_REPO_SLUG` is
   the repo the pipeline *writes* to — branch, `git push`, `gh pr create`. The product CICD triggers
   this pipeline after its own deploy and passes the testing context with it, so the PR stage 1 reads

@@ -3,7 +3,7 @@
 > **Status (2026-09-29): S1–S6 COMPLETE in one session.** All modules implemented, not just
 > scaffolded. Verified: `npx tsc --noEmit` clean · `npm run self-checks` 19/19 ·
 > `npx playwright test` 2/2 against a live URL · `npm run pipeline -- --dry-run --from-scenarios`
-> runs all 8 stages and writes `artifacts/run/run-report.json`.
+> runs all 9 stages and writes `artifacts/run/run-report.json`.
 > Remaining for later sessions: wire a real agent CLI into `src/agent/` (replacing
 > `cdp-builder-stub.ts`), fill product-owned content (`scenarios/*.txt`, domain map entry
 > steps, scope rules), and optionally run stage 8 against a real repo. Prompt templates in
@@ -205,7 +205,7 @@
 ## Context
 
 `D:\a_playground\tcgen` currently contains only `pipeline-pattern.md`. It describes an
-agent-driven test pipeline (8 stages) that reads an issue + diff, finds coverage gaps, writes
+agent-driven test pipeline (9 stages) that reads an issue + diff, finds coverage gaps, writes
 plain-English scenarios, generates specs, builds page objects by driving the live app, runs the
 suite, applies locator heals, and opens a PR — with a human as the merge gate. The goal is a
 **from-scratch, product-neutral boilerplate** implementing that pattern on latest Playwright.
@@ -360,7 +360,7 @@ a session by updating the session checklist in `PLAN.md`.
 - `npm ci && npx tsc --noEmit` — strict compile clean.
 - `npm run self-checks` — the cheap invariant suite passes (no browser).
 - `npm test` — playwright runs the sample spec (a trivial generated region + one handwritten test).
-- `npm run pipeline -- --dry-run` — orchestrator executes all 8 stages against a stub issue/diff
+- `npm run pipeline -- --dry-run` — orchestrator executes all 9 stages against a stub issue/diff
   and writes a run report without pushing.
 
 ## Out of scope (per the doc)

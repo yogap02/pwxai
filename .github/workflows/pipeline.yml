@@ -77,6 +77,10 @@ jobs:
       # The branch the delivery branch is based on. Empty is correct rather than harmful:
       # stage 8 uses `main` when SOURCE_BRANCH is unset.
       SOURCE_BRANCH: ${{ inputs.base_branch }}
+      # The report channel. Empty = no report is sent, and stage 9 says so; a report that
+      # fails to send fails that stage rather than looking like a quiet success.
+      TELEGRAM_API_KEY: ${{ secrets.TELEGRAM_API_KEY }}
+      TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
     steps:
       - uses: actions/checkout@v4
         with:

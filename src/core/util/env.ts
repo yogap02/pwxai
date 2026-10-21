@@ -113,6 +113,18 @@ export interface Env {
   SOURCE_REPO_SLUG: string | undefined;
   /** Source branch for the pipeline. */
   SOURCE_BRANCH: string | undefined;
+  /**
+   * The report channel: the bot token, and the chat a run reports its result to.
+   *
+   * Unset = no report is sent, and that is a legitimate configuration rather than a
+   * degradation — not every checkout has a bot. It is *named* in the stage output either
+   * way, because a report that never arrives must not look like one that did.
+   *
+   * The token is a secret: nothing outside the request may contain it, and
+   * `redaction.ts` knows both its shape and its URL as a backstop.
+   */
+  TELEGRAM_API_KEY: string | undefined;
+  TELEGRAM_CHAT_ID: string | undefined;
 }
 
 function requireEnv(name: string): string {
@@ -145,6 +157,8 @@ export const env: Env = {
   WORK_REPO_SLUG: optionalEnv('WORK_REPO_SLUG'),
   SOURCE_REPO_SLUG: optionalEnv('SOURCE_REPO_SLUG'),
   SOURCE_BRANCH: optionalEnv('SOURCE_BRANCH'),
+  TELEGRAM_API_KEY: optionalEnv('TELEGRAM_API_KEY'),
+  TELEGRAM_CHAT_ID: optionalEnv('TELEGRAM_CHAT_ID'),
 };
 
 export function requireModelKey(): string {

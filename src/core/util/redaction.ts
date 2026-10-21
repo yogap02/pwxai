@@ -13,6 +13,10 @@ const SECRET_PATTERNS: readonly RegExp[] = [
   /Bearer\s+[a-zA-Z0-9._-]{20,}/g,
   /Authorization:\s*[A-Za-z]+\s+\S+/gi,
   /password["']?\s*[:=]\s*["'][^"']{4,}["']/gi,
+  // A Telegram send URL *is* the secret: `.../bot<TOKEN>/sendMessage`. Covered by shape as
+  // well, because a token can reach a log line without its URL.
+  /https:\/\/api\.telegram\.org\/bot[^\s"'`]+/g,
+  /\b\d{6,}:[A-Za-z0-9_-]{30,}\b/g,
 ];
 
 export function redact(text: string): string {

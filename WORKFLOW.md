@@ -62,10 +62,12 @@ flowchart LR
         S5 --> S6
     end
 
-    subgraph P4["④ repair and ship"]
+    subgraph P4["④ repair, ship and report"]
         S7["7 · heal-apply"]
         S8["8 · git"]
+        S9["9 · notify"]
         S7 --> S8
+        S8 --> S9
     end
 
     IN --> S1
@@ -73,11 +75,12 @@ flowchart LR
     S4 --> S5
     S6 --> S7
     S8 --> OUT(["PR — a human reviews it,<br/>nothing merges itself"])
+    S9 --> CHAT(["Telegram — result, scope,<br/>and what the scope left out"])
 
     classDef stage fill:#F3F5F8,stroke:#DDE2E8,color:#212630
     classDef io fill:#171B23,stroke:#171B23,color:#FFFFFF
-    class S1,S2,S3,S4,S5,S6,S7,S8 stage
-    class IN,OUT io
+    class S1,S2,S3,S4,S5,S6,S7,S8,S9 stage
+    class IN,OUT,CHAT io
 ```
 
 **How to read it.** What passes between phases is *files on disk*, not conversation
@@ -90,7 +93,8 @@ missing.
 **Fatal vs recorded.** Stages 1–2 are fatal, because they decide *what to cover* —
 running the rest on a wrong plan wastes the run. Stages 3–7 record a failure and the
 run continues, so one pass gives you the whole picture. Stage 8 is skipped when there
-is nothing shippable.
+is nothing shippable. Stage 9 tells the chat, and is non-fatal too — but a report that
+did not arrive *fails that stage*, so it can never pass for a quiet success.
 
 ---
 
@@ -229,7 +233,7 @@ smaller-green, one layer up.
 ## One stage at a time
 
 ```bash
-npm run pipeline -- --pr 123     # all 8 stages
+npm run pipeline -- --pr 123     # all 9 stages
 npm run stage:2                  # re-run ONE stage against the last manifest
 npm run stage:3 -- --domain landing-page
 npm run stage:6 -- --grep @core  # a tiered playwright run

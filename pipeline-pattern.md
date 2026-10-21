@@ -34,7 +34,7 @@ detail, and it is the single most important thing to understand before adopting 
 
 ## 2. The loop
 
-Eight stages. Names match the stage records written into the run report.
+Nine stages. Names match the stage records written into the run report.
 
 | # | Stage | Input | Output | On failure |
 |---|---|---|---|---|
@@ -46,6 +46,7 @@ Eight stages. Names match the stage records written into the run report.
 | 6 | `playwright-test` | The chosen grep | Run results, recorded verbatim | Recorded, never reverted; run continues |
 | 7 | `heal-apply` | Runtime heal manifest | Locator files patched — only the repairs a passing test backed | Non-fatal; commit proceeds without it |
 | 8 | `git` | Everything above | Branch, commit, push, PR | Skipped when nothing shippable changed |
+| 9 | `notify` | The run record | The result, the scope it ran, and what that left out — sent to a chat | Non-fatal, but a report that did not arrive **fails the stage** |
 
 **The spine is one indirection.** Stage 1 emits `{domain, title}` pairs into its report. A single
 extractor turns those into a domain list, and stages 3 and 4 iterate that list. No feature name

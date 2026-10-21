@@ -88,6 +88,12 @@ export interface RunManifest {
    * that cannot tell those apart misattributes the decision to the agent.
    */
   grepOverride: string | null;
+  /**
+   * Stage 8's outcome: the PR it opened for review, or the fact that there was nothing to
+   * ship. Persisted because the report channel links to it — a PR reference parsed back out
+   * of a stage's prose output breaks the moment that wording changes.
+   */
+  delivery: { prUrl: string | null; shipped: boolean } | null;
   /** Ordered stage records for the run report. */
   stages: StageRecord[];
 }
@@ -115,6 +121,7 @@ export function newManifest(runId: string): RunManifest {
     scenarios: [],
     domains: [],
     grepOverride: null,
+    delivery: null,
     stages: [],
   };
 }
@@ -173,6 +180,7 @@ export async function loadManifest(): Promise<RunManifest> {
       healApply: d.healApply ?? null,
     })),
     grepOverride: raw.grepOverride ?? null,
+    delivery: raw.delivery ?? null,
     stages: raw.stages ?? [],
   };
 }

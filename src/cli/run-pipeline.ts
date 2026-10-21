@@ -1,5 +1,5 @@
 /**
- * Pipeline orchestrator. The eight-stage loop, sequenced.
+ * Pipeline orchestrator. The eight-stage loop, sequenced, then the report channel.
  *
  * Fail-open rules (pipeline-pattern.md §2, §3):
  *   - Stage 1 or 2 failure: comment on source PR (if available) and exit 1.
@@ -8,6 +8,8 @@
  *   - Stage 6: failures recorded as-is, never reverted.
  *   - Stage 7: non-fatal; commit proceeds without applied heals.
  *   - Stage 8: skipped when nothing shippable changed.
+ *   - Stage 9: the report channel. Non-fatal — but a report that did not arrive fails
+ *     the stage, so it is named rather than mistaken for a quiet success.
  *
  * The single indirection: stage 1 emits {domain, title}; a single extractor
  * turns those into a domain list; stages 3 and 4 iterate it. No feature name
@@ -34,6 +36,7 @@ import { createTestPlanStage } from '../stages/05-test-plan.js';
 import { createPlaywrightTestStage } from '../stages/06-playwright-test.js';
 import { createHealApplyStage } from '../stages/07-heal-apply.js';
 import { createGitStage } from '../stages/08-git.js';
+import { createNotifyStage } from '../stages/09-notify.js';
 
 interface CliOptions {
   pr: number | undefined;
@@ -148,6 +151,14 @@ async function main(): Promise<void> {
   } else {
     const r8 = await runner.run(createGitStage(codeHost));
     void r8;
+  }
+
+  // -- Stage 9: notify (the report channel; skipped on --dry-run, which tested nothing) ---
+  if (opts.dryRun) {
+    runner.markSkipped('notify', '--dry-run');
+  } else {
+    const r9 = await runner.run(createNotifyStage());
+    void r9;
   }
 
   await finalise(manifest);

@@ -23,6 +23,9 @@ export function createGitStage(codeHost: CodeHost): StageSpec {
       // stderr, and a merged read would mistake a warning for a working tree that has
       // something to ship — then push an empty branch and open a PR for it.
       if (status.stdout.trim() === '') {
+        // Recorded, not inferred: the report channel must be able to tell "we looked and
+        // there was nothing" from "this run never reached the delivery step".
+        ctx.manifest.delivery = { prUrl: null, shipped: false };
         return 'Nothing shippable changed; skipping branch/commit/push/PR.';
       }
 
@@ -52,6 +55,7 @@ export function createGitStage(codeHost: CodeHost): StageSpec {
         headBranch: branchName,
         baseBranch,
       });
+      ctx.manifest.delivery = { prUrl: ref.url, shipped: true };
       return `Opened PR: ${ref.url}`;
     },
   };

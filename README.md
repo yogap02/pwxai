@@ -19,7 +19,7 @@ cp .env.example .env            # fill in BASE_URL, MODEL_API_KEY, WORK_REPO_SLU
 npx playwright install chromium
 npm run self-checks             # cheap invariants, no browser
 npm test                        # playwright run against BASE_URL
-npm run pipeline -- --pr 123    # run all 8 stages against PR #123
+npm run pipeline -- --pr 123    # run all 9 stages against PR #123
 npm run stage:2                 # re-run ONE stage against the last manifest
 npm run stage:3 -- --domain landing-page
 ```
@@ -28,7 +28,7 @@ npm run stage:3 -- --domain landing-page
 
 `npm run stage:<n>` (or `npm run stage -- <n|name> [options]`) runs one stage
 against the manifest the previous run left in `artifacts/run/manifest.json`.
-Stages 1 and 2 *start* a manifest; stages 3–8 *consume* it and refuse to guess
+Stages 1 and 2 *start* a manifest; stages 3–9 *consume* it and refuse to guess
 when it is missing.
 
 ```bash
@@ -38,6 +38,7 @@ npm run stage:5                              # planner agent: scope + --grep
 npm run stage:6 -- --grep @core              # playwright run
 npm run stage:1 -- --pr 123                  # needs --pr (reads the issue + diff)
 npm run stage:8 -- --dry-run                 # mark git skipped instead of committing
+npm run stage:9                              # re-send the report to the chat
 ```
 
 | Option | Meaning |
@@ -45,7 +46,7 @@ npm run stage:8 -- --dry-run                 # mark git skipped instead of commi
 | `--domain <key>` | required for stages 3/4 when the manifest holds more than one domain |
 | `--pr <number>` | required for stage 1 |
 | `--grep <expr>` | override the planner's grep for stage 6 |
-| `--dry-run` | mark stages 6 and 8 skipped instead of running them |
+| `--dry-run` | mark stages 6, 8 and 9 skipped instead of running them |
 
 ## Running it
 
@@ -65,7 +66,7 @@ gh run watch                                                   # follow the run 
 | `pr` | The testing context: the PR whose change is under test, read from `source_repo`. |
 | `source_repo` | `owner/name` that PR lives in. Empty = this repo. |
 | `from_scenarios` | Skip stage 1 and digest the scenario files as they are — no PR needed. |
-| `dry_run` | Skip stage 6 (browser) and stage 8 (git push/PR). |
+| `dry_run` | Skip stage 6 (browser), stage 8 (git push/PR) and stage 9 (report). |
 | `test_grep` | The operator override above, typed per run. Empty = let the planner decide. |
 | `base_branch` | Branch for stage 8 to base the delivery branch on. Empty = `main`. |
 
@@ -101,13 +102,44 @@ Four verdicts per scenario:
 | `covered` | **No test was written** — the classifier judged an existing test already covers this. The reason names that test. Reachable only for a scenario with **no block at all**: a stale block never gets this far, it re-digests, or an edited scenario could be marked covered by the very block that still asserts its old text. |
 | `unbuildable` | The page objects cannot express it yet, so it became a stage-4 work order (`test.fixme`). |
 
+## Reporting the result
+
+Stage 9 (`notify`) posts the run to a Telegram chat, so the result reaches people who are not
+watching the Actions tab. It is off unless both variables are set:
+
+```bash
+TELEGRAM_API_KEY=<bot token from @BotFather>
+TELEGRAM_CHAT_ID=<the chat to post to>
+```
+
+Send the bot a message, then ask Telegram which chat that was:
+
+```bash
+curl -s "https://api.telegram.org/bot$TELEGRAM_API_KEY/getUpdates"
+```
+
+On GitHub, `TELEGRAM_API_KEY` goes in **secrets** and `TELEGRAM_CHAT_ID` in **variables** (a chat id
+is not a credential; a bot token is).
+
+The message carries what the summary carries, because a chat is read out of context: the status and
+why, the source PR, the tier and the grep that actually ran **and what that filter left out**, the
+per-domain pass/fail, what this run wrote or could not cover, and the PR when stage 8 opened one.
+There is no separate configuration for what it says — a report that could disagree with the summary
+would be the same smaller green in another medium.
+
+A message that cannot be sent **fails the stage** — non-fatal, so the run's results still stand and
+the run still exits 0 — rather than reporting a success, because a report nobody received must not
+look like one that arrived. With neither variable set, the stage says so and sends nothing: that is a
+legitimate setup, not a defect. `npm run stage:9` re-sends the last run's report from the manifest on
+disk, without re-running anything.
+
 ## Debug logging
 
 `DEBUG=true` narrates a run while it happens. Off by default, and it changes nothing
 about what a run *does* — it is observation, not a mode.
 
 ```bash
-DEBUG=true npm run pipeline -- --pr 123        # the whole 8-stage run
+DEBUG=true npm run pipeline -- --pr 123        # the whole 9-stage run
 DEBUG=true npm run stage:2                     # one stage, against the last manifest
 DEBUG=true npx playwright test --grep @smoke   # the page objects, inside a test
 npx playwright test --grep @smoke              # quiet again
@@ -363,7 +395,7 @@ record, not a wrong heal. Such a refusal is now recognisable: its outcome says t
 passed anyway. If a product renders its DOM late, teach the healer to settle before deciding, rather
 than widening the search.
 
-## The eight stages
+## The nine stages
 
 | # | Stage | Fails |
 |---|---|---|
@@ -375,6 +407,7 @@ than widening the search.
 | 6 | `playwright-test` | recorded as-is, never reverted |
 | 7 | `heal-apply` | non-fatal; only a verified repair is folded in |
 | 8 | `git` | skipped when nothing shippable; **refuses to ship** output that fails `typecheck`/`self-checks` |
+| 9 | `notify` | non-fatal; but a report that did not arrive **fails the stage**, so it cannot pass for a quiet success |
 
 ## What you supply
 

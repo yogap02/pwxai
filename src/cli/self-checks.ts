@@ -46,6 +46,13 @@ import { buildLookup, extractPomSurface, type PomSurface } from '../ai/capabilit
 import { viewportProfileIn, viewportCapabilityGap, VIEWPORT_MEMBER } from '../core/scenario/viewport.js';
 import { findLayoutSpill, type LayoutBox } from '../runtime/viewport.js';
 import { redact } from '../core/util/redaction.js';
+import { env } from '../core/util/env.js';
+import {
+  buildReportMessage,
+  runVerdict,
+  sendReportMessage,
+  telegramConfig,
+} from '../delivery/telegram.js';
 
 let passed = 0;
 let failed = 0;
@@ -2348,7 +2355,220 @@ check('the PR body carries the run scope and what it could not cover, not just p
   // The PR body is the durable record: `artifacts/` is gitignored, so the summary and the run
   // report never reach the PR they describe. A reviewer who sees only "6 passed" cannot tell
   // a whole-suite run from a narrowed one, and cannot see a scenario that was left blocked.
-  const m = newManifest('check-pr-body');
+  const m = sampleManifest('check-pr-body');
+
+  const body = buildPrBody(m);
+  assert(body.includes('tier: **smoke**'), 'the PR body must state the tier the run used');
+  assert(body.includes('@smoke|@20261021'), 'the PR body must state the grep that actually ran');
+  assert(
+    body.includes('NOT run'),
+    'a narrowed run must say what its filter left out — a silent narrowing reads as "all passed"',
+  );
+  assert(
+    body.includes('The hero CTA targets the portfolio'),
+    'the coverage this run added must be listed, not just counted',
+  );
+  assert(
+    body.includes('expectHeroHeadline()'),
+    'a blocked scenario must name what the page object is missing',
+  );
+  assert(body.includes('6 passed · 1 failed'), 'the test result must be in the body');
+  assert(body.includes('Nothing merges itself'), 'the body must state that it is not auto-merged');
+  assert(
+    body.includes('pipeline-run') && body.includes('artifact'),
+    'a failing run must point at the uploaded run record, or "1 failed" is unactionable',
+  );
+});
+
+check('the report channel carries the result and the scope, so a narrowed run cannot read as "all passed"', () => {
+  // A chat message is read on a phone, out of context: "6 passed" alone is indistinguishable
+  // from the whole suite passing. It carries the same scope lines the PR body does, for the
+  // same reason — a smaller green reported in a different medium is still a smaller green.
+  const msg = buildReportMessage(sampleManifest('36bed620'), { sourceRepo: 'yogap02/fotogaper' });
+  assert(msg.includes('36bed620'), 'the run id must be in the report');
+  assert(msg.includes('fotogaper') && msg.includes('PR #7'), 'the source of the change must be named');
+  assert(msg.includes('6 passed · 1 failed'), 'the test result must be in the report');
+  assert(msg.includes('tier: <b>smoke</b>'), 'the tier the run used must be stated');
+  assert(msg.includes('@smoke|@20261021'), 'the grep that actually ran must be stated');
+  assert(
+    msg.includes('NOT run'),
+    'a narrowed run must say what its filter left out — otherwise the report reads as "all passed"',
+  );
+  assert(
+    msg.includes('The pricing section lists all six packages'),
+    'a blocked scenario must be named, not only counted',
+  );
+  assert(msg.startsWith('❌'), 'a failed test means a failure headline, not a tick');
+  assert(!msg.includes('**'), 'the report is sent as HTML; raw markdown renders as literal asterisks');
+  assert(msg.includes('<b>') && msg.includes('<code>'), 'the report must actually use the markup');
+
+  // A scenario title is arbitrary text, so it must not be able to close a tag or open one.
+  const risky = sampleManifest('check-escape');
+  risky.domains[0]!.unbuildable[0]!.scenario.title = 'The pricing <b>section</b> & all six packages';
+  const escaped = buildReportMessage(risky, {});
+  assert(
+    escaped.includes('&lt;b&gt;') && escaped.includes('&amp;'),
+    'a title must be escaped, so it renders as text',
+  );
+  assert(
+    !escaped.includes('<b>section</b>'),
+    'a title must not be able to inject markup into the report',
+  );
+
+  // Telegram rejects an over-long message wholesale, which would lose the whole report.
+  // Every field here is unbounded in principle — a domain list, a title, a reason — so the
+  // message is cut with a notice rather than sent as something Telegram will refuse.
+  const many = newManifest('check-truncate');
+  many.domains = Array.from({ length: 80 }, (_, i) => ({
+    domain: `domain-${i}`,
+    scope: null,
+    unbuildable: [],
+    builder: 'succeeded',
+    tier: 'regression',
+    grep: '@regression',
+    playwright: { passed: 12, failed: 0, flaky: 0, durationMs: 1000 },
+    healApply: 'skipped',
+  }));
+  const big = buildReportMessage(many, {});
+  assert(big.length <= 4096, `the report must fit one Telegram message, got ${big.length}`);
+  assert(big.includes('truncated'), 'a report that was cut must say it was cut');
+
+  // The verdict is the one thing the two readers must agree on, and a run that recorded no
+  // browser result is `attention`: a green tick for "nothing was verified" is the lie the
+  // delivery colour must not tell.
+  const quiet = newManifest('check-verdict');
+  assert(runVerdict(quiet).verdict === 'attention', 'no test run recorded is not a pass');
+  const red = sampleManifest('check-verdict-2');
+  assert(runVerdict(red).verdict === 'failed', 'a failed test makes the run a failure');
+  assert(runVerdict(red).reason.includes('1 test'), 'the verdict must say why');
+});
+
+check('a report that did not arrive is named, and the token never leaves the request', async () => {
+  const saved = { key: env.TELEGRAM_API_KEY, chat: env.TELEGRAM_CHAT_ID };
+  const token = '8810820000:AAFfake-token-for-checks-only-000000';
+  try {
+    // Unset is a legitimate setup, not a defect — but it must be SAID, because a report
+    // nobody receives looks exactly like one nobody sent.
+    env.TELEGRAM_API_KEY = undefined;
+    env.TELEGRAM_CHAT_ID = undefined;
+    assert(telegramConfig() === null, 'both halves are required to configure the channel');
+    let calls = 0;
+    const unconfigured = await sendReportMessage('x', {
+      fetchImpl: async () => {
+        calls++;
+        return new Response('{}', { status: 200 });
+      },
+    });
+    assert(calls === 0, 'a run with no channel must not call out at all');
+    assert(
+      !unconfigured.ok && unconfigured.reason.includes('TELEGRAM_API_KEY'),
+      'an unconfigured channel must be named, not reported as sent',
+    );
+
+    env.TELEGRAM_API_KEY = token;
+    env.TELEGRAM_CHAT_ID = '-1001234567890';
+    let seenUrl = '';
+    let seenBody = '';
+    const rejected = await sendReportMessage('<b>hi</b>', {
+      fetchImpl: async (url, init) => {
+        seenUrl = String(url);
+        seenBody = String(init?.body);
+        return new Response(JSON.stringify({ description: 'Bad Request: chat not found' }), {
+          status: 400,
+        });
+      },
+    });
+    assert(seenUrl.endsWith('/sendMessage'), 'the send must go to sendMessage');
+    assert(seenUrl.includes('8810820000:AA'), 'the bot API path carries the token');
+    assert(
+      seenBody.includes('"chat_id":"-1001234567890"') && seenBody.includes('"parse_mode":"HTML"'),
+      'the body must name the chat and ask for HTML',
+    );
+    assert(
+      !rejected.ok && rejected.reason.includes('chat not found'),
+      'a rejected send must be a named failure — Telegram says why, and that reason is repeatable',
+    );
+    assert(!rejected.reason.includes('8810820000:AA'), 'the failure must never carry the token');
+
+    const unreachable = await sendReportMessage('x', {
+      fetchImpl: async () => {
+        throw new TypeError('fetch failed');
+      },
+    });
+    assert(!unreachable.ok, 'an unreachable channel must not read as delivered');
+    assert(
+      !unreachable.reason.includes('8810820000:AA') && !unreachable.reason.includes('api.telegram.org'),
+      'a transport failure must not echo the request URL: that URL is the secret',
+    );
+    assert(unreachable.reason.includes('TypeError'), 'the failure must say what kind it was');
+
+    // The backstop, for a token that reaches a log line by some other path.
+    assert(!redact(`boom ${seenUrl}`).includes(token), 'redaction must mask a Telegram send URL');
+    assert(!redact(`token ${token}`).includes(token), 'redaction must mask a bare bot token');
+  } finally {
+    env.TELEGRAM_API_KEY = saved.key;
+    env.TELEGRAM_CHAT_ID = saved.chat;
+  }
+});
+
+check('the report channel is wired where a run can reach it, and cannot pass for a quiet success', async () => {
+  const notify = await readFile(rehydrate('src/stages/09-notify.ts'), 'utf8');
+  const pipeline = await readFile(rehydrate('src/cli/run-pipeline.ts'), 'utf8');
+  const stageCli = await readFile(rehydrate('src/cli/run-stage.ts'), 'utf8');
+  const envSrc = await readFile(rehydrate('src/core/util/env.ts'), 'utf8');
+  const example = await readFile(rehydrate('.env.example'), 'utf8');
+  const workflow = await readFile(rehydrate('.github/workflows/pipeline.yml'), 'utf8');
+
+  // The tests are the evidence and a chat message is not, so this must not fail the run...
+  assert(/name:\s*'notify'/.test(notify) && /fatal:\s*false/.test(notify), 'notify must be non-fatal');
+  // ...but a report that never arrived must fail the stage that was supposed to send it:
+  // a green notify stage for an unsent report is the silent-success shape this repo exists
+  // to prevent. Returning a string would do exactly that.
+  assert(
+    /recordDegradation\('notify'/.test(notify) && /throw new Error/.test(notify),
+    'a failed send must fail the notify stage, so it appears under "Needs attention"',
+  );
+  assert(
+    /const config = telegramConfig\(\)/.test(notify) && /config === null/.test(notify),
+    'the unset case must be handled explicitly rather than as an error',
+  );
+
+  // After delivery, because the message carries the PR stage 8 opened.
+  const gitAt = pipeline.indexOf('createGitStage(codeHost)');
+  const notifyAt = pipeline.indexOf('createNotifyStage()');
+  assert(gitAt !== -1 && notifyAt > gitAt, 'notify must run after git, and carry what git shipped');
+  assert(
+    /markSkipped\('notify', '--dry-run'\)/.test(pipeline),
+    'a dry run tested nothing, so it must not report a result it never produced',
+  );
+  // Re-runnable on its own: `npm run stage:9` re-sends the report from the manifest on disk,
+  // which is the whole point of failing the stage rather than swallowing the send.
+  assert(
+    /'notify',/.test(stageCli) && /case 9:/.test(stageCli),
+    'stage 9 must be reachable by name and by number',
+  );
+
+  // THREE registration points (pipeline-pattern.md §5).
+  for (const name of ['TELEGRAM_API_KEY', 'TELEGRAM_CHAT_ID']) {
+    assert(envSrc.includes(name), `env.ts must declare ${name}`);
+    assert(example.includes(name), `.env.example must document ${name}`);
+    assert(workflow.includes(name), `the CI definition must register ${name}`);
+  }
+  assert(
+    /TELEGRAM_API_KEY: \$\{\{ secrets\./.test(workflow),
+    'the token is a secret: from `secrets`, never `vars`, which are readable',
+  );
+});
+
+// -----------------------------------------------------------------------------
+
+/**
+ * One run, two readers. The PR body and the chat report must say the same things about the
+ * same run — a narrowed scope, a blocked scenario, a failure — so both are held to this
+ * fixture rather than to two that can drift apart.
+ */
+function sampleManifest(runId: string): RunManifest {
+  const m = newManifest(runId);
   m.sourcePR = 7;
   m.branch = 'feat/hero';
   m.riskAreas = ['Hero copy in src/app/[locale]/page.tsx'];
@@ -2398,31 +2618,8 @@ check('the PR body carries the run scope and what it could not cover, not just p
       healApply: 'skipped',
     },
   ];
-
-  const body = buildPrBody(m);
-  assert(body.includes('tier: **smoke**'), 'the PR body must state the tier the run used');
-  assert(body.includes('@smoke|@20261021'), 'the PR body must state the grep that actually ran');
-  assert(
-    body.includes('NOT run'),
-    'a narrowed run must say what its filter left out — a silent narrowing reads as "all passed"',
-  );
-  assert(
-    body.includes('The hero CTA targets the portfolio'),
-    'the coverage this run added must be listed, not just counted',
-  );
-  assert(
-    body.includes('expectHeroHeadline()'),
-    'a blocked scenario must name what the page object is missing',
-  );
-  assert(body.includes('6 passed · 1 failed'), 'the test result must be in the body');
-  assert(body.includes('Nothing merges itself'), 'the body must state that it is not auto-merged');
-  assert(
-    body.includes('pipeline-run') && body.includes('artifact'),
-    'a failing run must point at the uploaded run record, or "1 failed" is unactionable',
-  );
-});
-
-// -----------------------------------------------------------------------------
+  return m;
+}
 
 /**
  * Run `body` against a scratch `artifacts/run/heals.json`, restoring whatever was

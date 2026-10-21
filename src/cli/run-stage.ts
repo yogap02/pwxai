@@ -43,6 +43,7 @@ import { createTestPlanStage } from '../stages/05-test-plan.js';
 import { createPlaywrightTestStage } from '../stages/06-playwright-test.js';
 import { createHealApplyStage } from '../stages/07-heal-apply.js';
 import { createGitStage } from '../stages/08-git.js';
+import { createNotifyStage } from '../stages/09-notify.js';
 import type { DigestOutcome } from '../stages/stage-types.js';
 
 /** Canonical stage names, index 0 = stage 1. Mirrors run-pipeline's wiring. */
@@ -55,6 +56,7 @@ const STAGE_NAMES = [
   'playwright-test',
   'heal-apply',
   'git',
+  'notify',
 ] as const;
 
 interface CliOptions {
@@ -86,7 +88,7 @@ function parseArgs(argv: readonly string[]): CliOptions {
   return out;
 }
 
-/** Accept `3` or `pom-builder`. Returns 1-8, or null when unknown. */
+/** Accept `3` or `pom-builder`. Returns 1-9, or null when unknown. */
 function resolveStage(arg: string): number | null {
   const n = Number(arg);
   if (Number.isInteger(n) && n >= 1 && n <= STAGE_NAMES.length) return n;
@@ -100,16 +102,17 @@ function usage(): void {
       'Run a single pipeline stage against the manifest left by a prior run.',
       '',
       'Usage: npm run stage -- <stage> [options]',
-      `  <stage>    1-8, or one of: ${STAGE_NAMES.join(', ')}`,
+      `  <stage>    1-9, or one of: ${STAGE_NAMES.join(', ')}`,
       '  --domain <key>   required for stages 3/4 when the manifest has >1 domain',
       '  --pr <number>    required for stage 1',
       '  --grep <expr>    override the planner grep for stage 6 (beats TEST_GREP)',
-      '  --dry-run        mark stages 6/8 skipped instead of running them',
+      '  --dry-run        mark stages 6/8/9 skipped instead of running them',
       '',
       'Examples:',
       '  npm run stage:2',
       '  npm run stage -- 3 --domain landing-page',
       '  npm run stage:1 -- --pr 123',
+      '  npm run stage:9   # re-send the report to the chat, without re-running anything',
     ].join('\n'),
   );
 }
@@ -167,13 +170,18 @@ async function main(): Promise<void> {
         return createPlaywrightTestStage(opts.grep ?? env.TEST_GREP ?? pickGrep(manifest));
       case 7:
         return createHealApplyStage();
-      default:
+      case 8:
         return createGitStage(codeHost);
+      case 9:
+        return createNotifyStage();
+      default:
+        console.error(`Unknown stage: ${opts.stage}`);
+        process.exit(2);
     }
   })();
 
   const runner = new StageRunner(manifest);
-  const skip = opts.dryRun && (opts.stage === 6 || opts.stage === 8);
+  const skip = opts.dryRun && (opts.stage === 6 || opts.stage === 8 || opts.stage === 9);
   dbg('stage-run', 'start', {
     stage: opts.stage,
     name: spec.name,
