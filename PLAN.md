@@ -188,14 +188,16 @@
 > `TS2554: Expected 0 arguments, but got 1.` for calling `goto(path)` on a zero-argument method,
 > which no list of member names could have caught.
 >
-> Verifying that end to end then found that stage 8 had **never delivered anything at all**: its
-> commit message went through a shell, which split `test(pipeline): generated tests + healed
-> locators` into argv entries, so git refused four unknown pathspecs and the commit failed — on a run
-> whose gates had just passed. The code host now hands `git` and `gh` `shell: false` (both are
-> executables; only `.cmd` shims need the shell), and `runStageProcess` resolves a spawn failure
-> instead of letting an unhandled `error` event kill the run. The PR body would have been re-split a
-> step later, and the same class hid two earlier bugs: a code path CI's `--from-scenarios` runs never
-> reached.
+> Verifying that end to end then found that stage 8 had **never delivered anything at all**, behind
+> three walls in a row. Its commit message went through a shell, which split `test(pipeline):
+> generated tests + healed locators` into argv entries, so git refused four unknown pathspecs; then
+> `openPr` asked `gh pr create` for `--json`, which that subcommand does not have (it belongs to `pr
+> view`), so gh died with `unknown flag` before it had looked at the repository; and the PR title and
+> body would have been re-split by the same shell one step later. The code host now hands `git` and
+> `gh` `shell: false` (both are executables; only `.cmd` shims need the shell), reads the PR URL from
+> stdout, and `runStageProcess` resolves a spawn failure instead of letting an unhandled `error`
+> event kill the run. The same class hid two earlier bugs: a code path CI's `--from-scenarios` runs
+> never reached.
 >
 > Still untouched, and the one thing left: the run's own report. The retry overwriting the digest's
 > verdicts still makes "nothing was generated" reachable for a run that generated.

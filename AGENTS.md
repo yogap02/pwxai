@@ -68,6 +68,12 @@ gh workflow run test-pipeline -f from_scenarios=true   # start a run by hand, no
   `error` rather than a non-zero exit, so `runStageProcess` resolves that as a failed process — as an
   unhandled `error` event it took the whole pipeline down instead of failing the stage that asked for
   it.
+- `gh pr create` takes no `--json` — that is `pr view`. It prints the PR URL on success, and that URL
+  (read from stdout) is the parsed result. The flag failed the step with `unknown flag: --json`
+  before gh had looked at the repository at all, so stage 8 — whose whole job is to open the PR — had
+  never opened one in any environment. The delivery path held three of these walls in a row: that
+  flag, the commit message a shell re-split, and a missing `gh` on PATH arriving as an unhandled
+  `error` instead of a failed stage.
 - Stage 6 must not pass `--reporter`: `playwright.config.ts` already configures `list` + `json`
   with the `outputFile` that this stage reads. Overriding the reporter sends the JSON to stdout and
   the stage then finds no report. It also deletes the stale report before running — reading the
