@@ -90,10 +90,12 @@ export interface Env {
    * it is the filter, the planner agent is skipped, and the floor is not applied
    * (see `planning/planner.ts`).
    *
-   * Deliberately NOT registered in the CI definition, unlike every other variable
-   * here: it is an operator override, and a standing value in CI would pin every run
-   * to it. Same class of exception as `HEAL_RUN_ID` — that one is per-run plumbing,
-   * this one is a human's instruction.
+   * Never a standing value in the CI definition, unlike every other variable
+   * here: it is an operator override, and a value there would pin every run to it.
+   * It is a `workflow_dispatch` input instead, so an operator can still supply one
+   * for a single run without a shell. Same class of exception as `HEAL_RUN_ID` — that
+   * one is per-run plumbing, this one is a human's instruction — and
+   * `npm run self-checks` enforces that every assignment of it comes from an input.
    */
   TEST_GREP: string | undefined;
   /** Repo slug (owner/name) for delivery. */
