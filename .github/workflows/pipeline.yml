@@ -1,0 +1,55 @@
+name: test-pipeline
+
+# Self-checks run immediately before the pipeline, in the same command
+# (pipeline-pattern.md §3, "Cheap checks gate expensive spend").
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  self-checks-and-pipeline:
+    runs-on: ubuntu-latest
+    env:
+      # THREE registration points (pipeline-pattern.md §5): this definition,
+      # the container environment (the browser step below), and .env.example.
+      BASE_URL: ${{ vars.BASE_URL }}
+      MODEL_API_KEY: ${{ secrets.MODEL_API_KEY }}
+      MODEL_BASE_URL: ${{ vars.MODEL_BASE_URL }}
+      MODEL_NAME: ${{ vars.MODEL_NAME }}
+      MODEL_CONCURRENCY: '4'
+      # Debug logging toggle. Registered here (the container environment that the
+      # tests run in) as well as .env.example — a value set only in a step's shell
+      # never reaches the test process.
+      DEBUG: ${{ vars.DEBUG }}
+      # Reasoning models spend the pipeline's small token budgets on thinking and
+      # return null content unless this is set to none/minimal.
+      MODEL_REASONING_EFFORT: ${{ vars.MODEL_REASONING_EFFORT }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO_SLUG: ${{ github.repository }}
+      SOURCE_BRANCH: ${{ github.event.pull_request.base.ref }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Install browsers (container environment registration point)
+        run: npx playwright install --with-deps chromium
+
+      - name: Self-checks + typecheck
+        run: npm run typecheck && npm run self-checks
+
+      - name: Pipeline
+        env:
+          # Tests run inside the container — a value set only in this step's
+          # shell never reaches them. Register at the job env level (above).
+          TCGEN_PR: ${{ github.event.pull_request.number }}
+        run: npm run pipeline -- --pr "$TCGEN_PR"

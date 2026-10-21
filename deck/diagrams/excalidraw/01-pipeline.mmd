@@ -1,0 +1,42 @@
+%% 01-pipeline — exported from WORKFLOW.md
+%% paste into Excalidraw:  menu → Mermaid to Excalidraw
+
+flowchart LR
+    IN(["GitHub issue
++ PR diff"])
+
+    subgraph P1["① decide what to cover"]
+        S1["1 · gap-analysis"]
+        S2["2 · testcase-digest"]
+        S1 --> S2
+    end
+
+    subgraph P2["② build the vocabulary"]
+        S3["3 · pom-builder"]
+        S4["4 · digest-retry"]
+        S3 --> S4
+    end
+
+    subgraph P3["③ run it"]
+        S5["5 · test-plan"]
+        S6["6 · playwright-test"]
+        S5 --> S6
+    end
+
+    subgraph P4["④ repair and ship"]
+        S7["7 · heal-apply"]
+        S8["8 · git"]
+        S7 --> S8
+    end
+
+    IN --> S1
+    S2 --> S3
+    S4 --> S5
+    S6 --> S7
+    S8 --> OUT(["PR — a human reviews it,
+nothing merges itself"])
+
+    classDef stage fill:#F3F5F8,stroke:#DDE2E8,color:#212630
+    classDef io fill:#171B23,stroke:#171B23,color:#FFFFFF
+    class S1,S2,S3,S4,S5,S6,S7,S8 stage
+    class IN,OUT io

@@ -1,0 +1,17 @@
+# Line endings: LF in the working tree, on every platform.
+#
+# This repo compares generated files BYTE-FOR-BYTE — a managed region must be a
+# fixpoint of its own writer, and "a held block comes back identical" is a
+# self-checked invariant. With core.autocrlf=true (the Windows default) git
+# rewrites the working tree to CRLF on checkout, so every generated spec would
+# stop matching the bytes the pipeline writes and the diff would churn on every
+# run while nothing about the test changed.
+#
+# This overrides autocrlf, so the working tree matches what the tooling produces.
+* text=auto eol=lf
+
+# Real binaries — never normalised.
+*.pptx binary
+*.png binary
+*.jpg binary
+*.ico binary

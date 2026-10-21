@@ -1,0 +1,14 @@
+{
+  "smoke": {
+    "description": "The critical paths only. A fast signal that the app is up and the main journeys work. The narrowest scope.",
+    "tags": ["@smoke"]
+  },
+  "sanity": {
+    "description": "The always-run key tests: smoke plus every core test. Broader than smoke, still not the whole suite.",
+    "tags": ["@smoke", "@core"]
+  },
+  "regression": {
+    "description": "The whole suite, no filter. Also the fail-open fallback: any degraded input widens to this. MUST select everything.",
+    "tags": []
+  }
+}

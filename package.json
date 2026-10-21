@@ -1,0 +1,39 @@
+{
+  "name": "tcgen",
+  "version": "0.1.0",
+  "private": true,
+  "description": "An AI test-pipeline boilerplate: reads issues + diffs, finds coverage gaps, writes scenarios, generates specs, builds page objects, runs the suite, applies heals, opens a PR.",
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "self-checks": "tsx src/cli/self-checks.ts",
+    "pipeline": "tsx src/cli/run-pipeline.ts",
+    "stage": "tsx src/cli/run-stage.ts",
+    "stage:1": "tsx src/cli/run-stage.ts 1",
+    "stage:2": "tsx src/cli/run-stage.ts 2",
+    "stage:3": "tsx src/cli/run-stage.ts 3",
+    "stage:4": "tsx src/cli/run-stage.ts 4",
+    "stage:5": "tsx src/cli/run-stage.ts 5",
+    "stage:6": "tsx src/cli/run-stage.ts 6",
+    "stage:7": "tsx src/cli/run-stage.ts 7",
+    "stage:8": "tsx src/cli/run-stage.ts 8",
+    "test": "playwright test",
+    "test:list": "playwright test --list",
+    "show:report": "playwright show-report"
+  },
+  "dependencies": {
+    "dotenv": "18.0.4",
+    "openai": "7.23.0",
+    "p-limit": "7.3.3",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "24.3.1",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2"
+  }
+}

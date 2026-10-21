@@ -1,0 +1,31 @@
+%% 04-planner — exported from WORKFLOW.md
+%% paste into Excalidraw:  menu → Mermaid to Excalidraw
+
+flowchart LR
+    M["manifest:
+risk areas + digest verdicts"] --> AG{"planner agent:
+smoke, sanity
+or regression?"}
+    AG --> PL{"did every input
+degrade cleanly?"}
+    PL -- "yes" --> TIER["scope selection
+tags from tiers.json"]
+    PL -- "no — anything unclear" --> OPEN["fail open to the full suite,
+with a named reason"]
+    OPEN --> TIER
+    AG -- "errored or garbage" --> OPEN
+    TIER --> FLOOR["enforced floor:
+every test generated this run
+(@YYYYMMDD)"]
+    FLOOR --> RUN["playwright run
+--grep @smoke|@core"]
+    RUN --> RES["results recorded as-is,
+never reverted or filtered"]
+    RES --> SUM["summary.md:
+every scenario's verdict + reason"]
+
+    classDef gate fill:#FFF6E5,stroke:#B46A00,color:#212630
+    classDef warn fill:#FDECEA,stroke:#C0392B,color:#7B241C
+    class AG gate
+    class PL gate
+    class OPEN warn

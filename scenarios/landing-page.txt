@@ -1,0 +1,89 @@
+Landing page scenarios for fotogaper (https://foto.gappp.my.id/en).
+One .txt per feature area. Blocks separated by `---`. The ID of each block is a
+hash of its normalised TEST title. Edit by hand, or let stage 1 append.
+See pipeline-pattern.md §3 "Scenarios are plain text, and they are the source of truth".
+
+---
+
+TEST: The landing page loads with the site title
+Tags: @smoke @core
+Expected: Opening /en sets the document title to "fotogaper | Specialized Product & Macro Photography"
+Notes: Live-probed 2026-10-19. Title is set by the app, not the <title> in the served HTML — assert after load.
+
+---
+
+TEST: The hero shows the headline and tagline
+Tags: @smoke @core
+Expected: The page displays the h1 "The Truth in Every Detail" and the tagline "Macro and Product Photographer"
+Notes: h1 is unique on the page.
+
+---
+
+TEST: The hero call to action leads to the portfolio
+Tags: @core
+Expected: The "Explore My Work" link resolves to /en/portfolio and navigates there when clicked
+Notes: Destination page is the portfolio domain; assert the href here, follow-through belongs there.
+
+---
+
+TEST: The primary navigation links to Portfolio, Pricing and Contact
+Tags: @smoke @core
+Expected: The top navigation contains links labelled Portfolio (to /en/portfolio), Pricing (to /en#pricing) and Contact (to /en#contact)
+Notes: Pricing and Contact are in-page anchors on /en, not separate routes.
+
+---
+
+TEST: The language switcher offers Indonesian and English
+Tags: @core
+Expected: The navigation shows links to /id and /en
+Notes: /en is the current locale. Do not assert which one is visually active without a probe.
+
+---
+
+TEST: The niches section lists the default collection with filters
+Tags: @smoke @core
+Expected: The portfolio section shows filter buttons all, macro, products, diecast and jewelry, and at least three project cards
+Notes: Default filter is "all". Two cards currently share the title "Keycaps Artisan" — do not key on card title alone.
+
+---
+
+TEST: The pricing section lists all six packages
+Tags: @core
+Expected: The pricing section shows six package cards and the reference codes PKG-001 through PKG-006
+Notes: Card titles: Starter Basic, Starter Creative, Pro Basic, Pro Creative, Non-Profit & SME, Enterprise. Order is stable as of 2026-10-19.
+
+---
+
+TEST: Each package offers a WhatsApp enquiry link
+Tags: @regression
+Expected: Every package card has a "Let's Talk" link whose target is a wa.me URL carrying that package name in the prefilled message
+Notes: External link; assert the href only, never click through.
+
+---
+
+TEST: The contact form exposes its five fields and submit button
+Tags: @smoke @core
+Expected: The contact section contains name, email, phone, projectType and message fields plus a Send Message button
+Notes: Fields have visible captions but NO associated <label for>/aria-label — getByLabel and getByRole(textbox,{name}) resolve to nothing. Use the name attribute. Form is guarded by Cloudflare Turnstile: fill and assert, never submit.
+
+---
+
+TEST: The footer links to the privacy policy
+Tags: @smoke
+Expected: The footer shows a "Privacy Policy" link to /en/privacy and a copyright line mentioning fotogaper
+Notes: Copyright year is dynamic (© 2026 as of probe) — match the year loosely.
+
+--- 
+
+TEST: Navbar should contain localization button
+Tags: @core
+Expected: localization button of id and en language exist in the navbar
+
+--- 
+
+TEST: Mobile responsive layout should be landing without any visual error
+Tags: @core
+Expected: Launching and landing using mobile viewport doesn't causing any visual problem, and nothing spills out of the container it is laid out in — in particular the Cloudflare Turnstile slot in the inquiry form is wide enough for the widget it declares
+Notes: The Turnstile widget frame is NEVER injected in an automated browser (probed: no iframe for any data-size), so no measurement of the page can see it. The assertable form is the slot-vs-declared-width contract: the slot reserves 276px at 390x844 while the declared default widget is a fixed 300px, which spills 24px out of the form in a real browser.
+
+---

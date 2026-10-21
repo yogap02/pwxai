@@ -1,0 +1,33 @@
+%% 03-stage-7-heal — exported from WORKFLOW.md
+%% paste into Excalidraw:  menu → Mermaid to Excalidraw
+
+flowchart TD
+    F["locator did not resolve,
+or matched 2+ elements"] --> Q{"identified by a CSS
+string or by copy?"}
+    Q -- "CSS string" --> N{"does a narrowing resolve
+to exactly ONE element?"}
+    N -- "no" --> R1["refuse · not-unique
+never .first()"]
+    N -- "yes" --> CAND["candidate repair"]
+    Q -- "copy text" --> CP{"uniquely nearest, and above
+the similarity floor?"}
+    CP -- "no, or a near tie" --> R2["refuse · no-candidate / ambiguous"]
+    CP -- "yes" --> LC{"the run is in the
+locale the copy was written for?"}
+    LC -- "no" --> R3["refuse · locale-mismatch
+/id Portofolio is 0.90 like /en Portfolio"]
+    LC -- "yes" --> CAND
+    CAND --> T{"did the test that
+used the repair pass?"}
+    T -- "test-passed" --> W["stage 7 writes the repair
+into the source"]
+    T -- "test-failed / unknown" --> D["declined and named
+the runtime keeps healing"]
+
+    classDef gate fill:#FFF6E5,stroke:#B46A00,color:#212630
+    classDef bad fill:#FDECEA,stroke:#C0392B,color:#7B241C
+    classDef good fill:#E8F5E9,stroke:#2EAD33,color:#1E7A22
+    class Q,N,CP,LC,T gate
+    class R1,R2,R3,D bad
+    class CAND,W good

@@ -1,0 +1,16 @@
+{
+  "landing-page": {
+    "description": "Public marketing landing page for fotogaper (macro & product photography): hero, before/after proof, niche collections, six pricing packages, and the contact/enquiry form.",
+    "entryPaths": ["/en"],
+    "needsAuth": false,
+    "entryDiscoverySteps": [
+      "Open BASE_URL + '/en' directly. The landing page is public and needs no sign-in.",
+      "Do NOT rely on 'Pricing'/'Contact' nav links scrolling to anchors as navigation — they are in-page '#pricing' and '#contact' anchors.",
+      "The '/en/portfolio' route is a separate domain; leave it out of this one."
+    ],
+    "specDir": "tests/landing-page",
+    "pomDir": "src/page-objects/landing-page",
+    "className": "LandingPage",
+    "confidence": 1.0
+  }
+}
