@@ -32,6 +32,7 @@ import { collectExistingTitles, digestPath } from '../stages/02-testcase-digest.
 import { applyScenarioTags, dateTagIn } from '../core/scenario/test-tags.js';
 import { applyHeals } from '../runtime/heal-writer.js';
 import { repairable } from '../stages/07-heal-apply.js';
+import { buildPrBody } from '../delivery/pr-body.js';
 import { HealManifest, healNote, refusalNote, healReportLines, type HealRecord } from '../runtime/heal-manifest.js';
 import { closestCopy, fallbackCandidates, localeOf, similarity } from '../runtime/heal-locator.js';
 import { freshObservationLines, OBSERVATION_HEADING } from '../agent/cdp-builder-stub.js';
@@ -2260,6 +2261,128 @@ check('debug is registered where a run can read it, and is actually emitted', as
       `${pom} must narrate itself through the debug logger`,
     );
   }
+});
+
+// -----------------------------------------------------------------------------
+
+check('a source repo can differ from the repo that delivers', async () => {
+  // The product repo dispatches this pipeline after its own deploy, so the PR stage 1 reads
+  // lives there while the branch, push and PR happen here. One slug cannot serve both:
+  // reading the change with the delivery slug looks for PR #N in the wrong repository —
+  // failing, or worse, reading a number that happens to exist in both.
+  const github = stripComments(await readFile(rehydrate('src/delivery/github.ts'), 'utf8'));
+  const fetchSource = github.slice(github.indexOf('fetchSource('), github.indexOf('createBranch('));
+  assert(fetchSource.includes('sourceRepoSlug()'), 'fetchSource must read the SOURCE repo slug');
+  assert(
+    !fetchSource.includes('requireRepoSlug()'),
+    'fetchSource must not read the change under test from the DELIVERY repo',
+  );
+  const openPr = github.slice(github.indexOf('openPr('), github.indexOf('private async gh('));
+  assert(openPr.includes('requireRepoSlug()'), 'openPr must open the PR against the DELIVERY repo');
+
+  // Registered where a run can read it: CI definition, container env, .env.example.
+  const example = await readFile(rehydrate('.env.example'), 'utf8');
+  const workflow = await readFile(rehydrate('.github/workflows/pipeline.yml'), 'utf8');
+  assert(example.includes('SOURCE_REPO_SLUG'), '.env.example must document SOURCE_REPO_SLUG');
+  assert(workflow.includes('SOURCE_REPO_SLUG'), 'the CI definition must register SOURCE_REPO_SLUG');
+  const envSource = await readFile(rehydrate('src/core/util/env.ts'), 'utf8');
+  assert(
+    envSource.includes("optionalEnv('SOURCE_REPO_SLUG')"),
+    'env.ts must read SOURCE_REPO_SLUG through optionalEnv',
+  );
+});
+
+check('the delivery branch is never based on a branch from another repo', async () => {
+  // `manifest.branch` is the SOURCE PR's branch. When the change under test lives in another
+  // repo that ref does not exist here, so basing the delivery branch on it fails inside git
+  // with an error about a branch this repo never had — after the tests have already run.
+  const git = stripComments(await readFile(rehydrate('src/stages/08-git.ts'), 'utf8'));
+  assert(
+    /baseBranch\s*=\s*deliveryBaseBranch\(/.test(git),
+    'stage 8 must decide its base branch deliberately (baseBranch = deliveryBaseBranch(ctx))',
+  );
+  assert(
+    !/baseBranch\s*=\s*env\.SOURCE_BRANCH \?\? ctx\.manifest\.branch/.test(git),
+    'the source PR branch must not become the delivery base when the source repo is another repo',
+  );
+});
+
+check('the PR body carries the run scope and what it could not cover, not just pass/fail', () => {
+  // The PR body is the durable record: `artifacts/` is gitignored, so the summary and the run
+  // report never reach the PR they describe. A reviewer who sees only "6 passed" cannot tell
+  // a whole-suite run from a narrowed one, and cannot see a scenario that was left blocked.
+  const m = newManifest('check-pr-body');
+  m.sourcePR = 7;
+  m.branch = 'feat/hero';
+  m.riskAreas = ['Hero copy in src/app/[locale]/page.tsx'];
+  m.newScenarios = [
+    { domain: 'landing-page', title: 'The hero CTA targets the portfolio', tags: ['@smoke'] },
+  ];
+  recordScenario(m, {
+    domain: 'landing-page',
+    id: 'aaa',
+    contentHash: 'h1',
+    title: 'The hero CTA targets the portfolio',
+    tags: ['@smoke'],
+    verdict: 'generated',
+    reason: 'wrote a new managed block',
+  });
+  recordScenario(m, {
+    domain: 'landing-page',
+    id: 'bbb',
+    contentHash: 'h2',
+    title: 'The pricing section lists all six packages',
+    tags: ['@regression'],
+    verdict: 'unbuildable',
+    reason: 'the page object cannot express it yet',
+  });
+  m.domains = [
+    {
+      domain: 'landing-page',
+      scope: { newScenarios: 1, touchedAreas: ['hero'] },
+      unbuildable: [
+        {
+          scenario: {
+            id: 'bbb',
+            contentHash: 'h2',
+            title: 'The pricing section lists all six packages',
+            tags: ['@regression'],
+            expected: '',
+            notes: '',
+            raw: '',
+          },
+          missingCapabilities: ['expectHeroHeadline()'],
+        },
+      ],
+      builder: 'succeeded',
+      tier: 'smoke',
+      grep: '@smoke|@20261021',
+      playwright: { passed: 6, failed: 1, flaky: 0, durationMs: 1234 },
+      healApply: 'skipped',
+    },
+  ];
+
+  const body = buildPrBody(m);
+  assert(body.includes('tier: **smoke**'), 'the PR body must state the tier the run used');
+  assert(body.includes('@smoke|@20261021'), 'the PR body must state the grep that actually ran');
+  assert(
+    body.includes('NOT run'),
+    'a narrowed run must say what its filter left out — a silent narrowing reads as "all passed"',
+  );
+  assert(
+    body.includes('The hero CTA targets the portfolio'),
+    'the coverage this run added must be listed, not just counted',
+  );
+  assert(
+    body.includes('expectHeroHeadline()'),
+    'a blocked scenario must name what the page object is missing',
+  );
+  assert(body.includes('6 passed · 1 failed'), 'the test result must be in the body');
+  assert(body.includes('Nothing merges itself'), 'the body must state that it is not auto-merged');
+  assert(
+    body.includes('pipeline-run') && body.includes('artifact'),
+    'a failing run must point at the uploaded run record, or "1 failed" is unactionable',
+  );
 });
 
 // -----------------------------------------------------------------------------

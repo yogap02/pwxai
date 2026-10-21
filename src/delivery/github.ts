@@ -26,7 +26,10 @@ const NO_SHELL = { shell: false } as const;
 
 export class GitHubCodeHost implements CodeHost {
   async fetchSource(prNumber: number): Promise<SourceIssue> {
-    const repo = requireRepoSlug();
+    // Deliberately NOT the delivery slug: the change under test can live in another repo.
+    // A product repo dispatches this pipeline after its deploy, so stage 1 reads the PR
+    // over there while stage 8 opens a PR here (see `env.SOURCE_REPO_SLUG`).
+    const repo = sourceRepoSlug();
     const [issue, diff] = await Promise.all([
       this.ghJson(['pr', 'view', String(prNumber), '--repo', repo, '--json', 'number,title,body,headRefName']),
       this.gh(['pr', 'diff', String(prNumber), '--repo', repo]),
@@ -124,6 +127,15 @@ function ghEnv(): Record<string, string> {
   const base: Record<string, string> = { DEBUG: '', GH_DEBUG: '' };
   if (!env.GH_TOKEN) return base;
   return { ...base, GH_TOKEN: env.GH_TOKEN, GH_ENTERPRISE_TOKEN: env.GH_TOKEN };
+}
+
+/**
+ * The repo whose PR stage 1 reads: `SOURCE_REPO_SLUG` when a run is triggered from
+ * another repo (the product repo's post-deploy trigger), else the delivery repo — which
+ * is what keeps a single-repo run working with no new configuration.
+ */
+function sourceRepoSlug(): string {
+  return env.SOURCE_REPO_SLUG ?? requireRepoSlug();
 }
 
 function requireRepoSlug(): string {

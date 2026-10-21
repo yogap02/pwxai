@@ -8,6 +8,7 @@
 import type { StageContext, StageSpec } from '../core/orchestration/stage-runner.js';
 import { runStageProcess } from '../core/orchestration/stage-runner.js';
 import type { CodeHost } from '../delivery/code-host.js';
+import { buildPrBody } from '../delivery/pr-body.js';
 import { env } from '../core/util/env.js';
 
 export function createGitStage(codeHost: CodeHost): StageSpec {
@@ -25,7 +26,7 @@ export function createGitStage(codeHost: CodeHost): StageSpec {
         return 'Nothing shippable changed; skipping branch/commit/push/PR.';
       }
 
-      const baseBranch = env.SOURCE_BRANCH ?? ctx.manifest.branch ?? 'main';
+      const baseBranch = deliveryBaseBranch(ctx);
       const branchName = `tcgen/${ctx.manifest.runId}`;
 
       // The repo's own gates, run on the OUTPUT for once. CI runs `typecheck && self-checks`
@@ -47,7 +48,7 @@ export function createGitStage(codeHost: CodeHost): StageSpec {
       await codeHost.push(branchName);
       const ref = await codeHost.openPr({
         title: `test(pipeline): generated tests for run ${ctx.manifest.runId}`,
-        body: buildPrBody(ctx),
+        body: buildPrBody(ctx.manifest),
         headBranch: branchName,
         baseBranch,
       });
@@ -76,32 +77,19 @@ async function shipGate(): Promise<string | null> {
   return null;
 }
 
-function buildPrBody(ctx: StageContext): string {
-  const domains = ctx.manifest.domains;
-  const pw = domains[0]?.playwright ?? null;
-  const lines = [
-    `## Pipeline run ${ctx.manifest.runId}`,
-    ``,
-    `Source: PR #${ctx.manifest.sourcePR ?? '?'}`,
-    ``,
-    `**What this PR adds:**`,
-    `- New scenarios in \`scenarios/\` (stage 1)`,
-    `- Generated tests inside managed regions (stage 2 + retry)`,
-    `- Page-object members added by the builder (stage 3)`,
-    `- Locator heals applied (stage 7)`,
-    ``,
-  ];
-  if (pw) {
-    lines.push(
-      `**Playwright run:**`,
-      `- Passed: ${pw.passed}`,
-      `- Failed: ${pw.failed}`,
-      `- Flaky: ${pw.flaky}`,
-      ``,
-      `Failures above are **not** auto-reverted. The run result is the signal — see the run report for details.`,
-      ``,
-    );
-  }
-  lines.push(`**Review guidance:** generated code is between \`@digest:managed:start/end\`. Everything outside is handwritten.`);
-  return lines.join('\n');
+/**
+ * The branch the delivery branch is based on.
+ *
+ * `manifest.branch` is the SOURCE PR's branch — the change under test. When that change
+ * lives in another repo (the product repo dispatching this pipeline after its deploy), the
+ * ref does not exist here, so `git fetch origin <it>` would fail with a git error naming a
+ * branch the deliverer never had. `SOURCE_BRANCH` is the deliberate way to say it, and the
+ * source branch is only a sensible default when the two repos are the same one.
+ */
+function deliveryBaseBranch(ctx: StageContext): string {
+  if (env.SOURCE_BRANCH !== undefined) return env.SOURCE_BRANCH;
+  const foreign =
+    env.SOURCE_REPO_SLUG !== undefined && env.SOURCE_REPO_SLUG !== env.REPO_SLUG;
+  if (foreign) return 'main';
+  return ctx.manifest.branch ?? 'main';
 }

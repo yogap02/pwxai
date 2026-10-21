@@ -98,8 +98,15 @@ export interface Env {
    * `npm run self-checks` enforces that every assignment of it comes from an input.
    */
   TEST_GREP: string | undefined;
-  /** Repo slug (owner/name) for delivery. */
+  /** Repo slug (owner/name) for delivery: where the generated tests land. */
   REPO_SLUG: string | undefined;
+  /**
+   * Repo slug (owner/name) whose change is under test, when that is not the repo that
+   * delivers. The product repo dispatches this pipeline after its own deploy, so the PR
+   * stage 1 reads lives over there while the branch, push and PR live here. Absent =
+   * `REPO_SLUG`, the single-repo case.
+   */
+  SOURCE_REPO_SLUG: string | undefined;
   /** Source branch for the pipeline. */
   SOURCE_BRANCH: string | undefined;
 }
@@ -132,6 +139,7 @@ export const env: Env = {
   CI: optionalEnv('CI'),
   TEST_GREP: optionalEnv('TEST_GREP'),
   REPO_SLUG: optionalEnv('REPO_SLUG'),
+  SOURCE_REPO_SLUG: optionalEnv('SOURCE_REPO_SLUG'),
   SOURCE_BRANCH: optionalEnv('SOURCE_BRANCH'),
 };
 

@@ -342,6 +342,24 @@ function overrideNote(
     .join(' ');
 }
 
+/**
+ * The scope a run covered, and what its filter left out — for a report that is not this
+ * summary: the PR body stage 8 opens. It reuses `domainFacts` and `narrowingNote` rather
+ * than restating the tier→tag rules, because a PR body that quietly disagrees with the
+ * summary is the same silent smaller-green in a different medium. `artifacts/` is
+ * gitignored, so for a reviewer the PR body is the only place this can be read.
+ */
+export function scopeCoverageLines(manifest: RunManifest): string[] {
+  const out: string[] = [];
+  for (const d of manifest.domains) {
+    const facts = domainFacts(manifest, d).filter((f) => /^(scope|tier|grep):/.test(f));
+    if (facts.length > 0) out.push(`- \`${d.domain}\` — ${facts.join(' · ')}`);
+    const note = narrowingNote(manifest, d);
+    if (note !== null) out.push(`- ${note}`);
+  }
+  return out;
+}
+
 function domainFacts(manifest: RunManifest, d: RunManifest['domains'][number]): string[] {
   const facts: string[] = [];
   if (manifest.grepOverride !== null) facts.push('scope: **human override**');
