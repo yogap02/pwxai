@@ -68,21 +68,19 @@ export class GitHubCodeHost implements CodeHost {
         '--body', input.body,
         '--head', input.headBranch,
         '--base', input.baseBranch,
-        '--json', 'url,number',
       ],
       { timeoutMs: GH_TIMEOUT, env: ghEnv(), ...NO_SHELL },
     );
-    if (res.ok) {
-      try {
-        const j = JSON.parse(res.stdout) as { url: string; number: number };
-        return { number: j.number, url: j.url };
-      } catch {
-        // fall through to stdout parsing
-      }
-    }
-    // Parse the URL from whatever gh printed (plain success or error text).
+    // No `--json` here: `gh pr create` prints the PR URL on success and does not take that flag —
+    // it belongs to `pr view`/`pr list`. Asking for it made this step die with "unknown flag:
+    // --json" before gh had even looked at the repository, so no run had ever opened a PR.
+    // The URL IS the parsed result, so it comes from stdout.
     const url = /https:\/\/\S+\/pull\/\d+/.exec(res.stdout)?.[0];
-    if (!url) throw new Error(`gh pr create: could not parse PR URL from output: ${res.output.slice(0, 500)}`);
+    if (url === undefined) {
+      throw new Error(
+        `gh pr create: no PR URL in stdout (exit ok=${res.ok}): ${res.output.slice(0, 500)}`,
+      );
+    }
     return { number: Number(url.split('/').pop()), url };
   }
 

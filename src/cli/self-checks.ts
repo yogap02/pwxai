@@ -2173,6 +2173,19 @@ check('a child is not handed our DEBUG, which it may read as its own switch', as
   assert(/GH_DEBUG:\s*''/.test(fn), 'ghEnv() must clear GH_DEBUG too, which is the same switch');
 });
 
+check('the PR step asks gh only for flags gh has', async () => {
+  // `gh pr create` prints the PR URL and has no `--json` — that flag belongs to `pr view`. Asking
+  // for it made every stage-8 PR step die with "unknown flag: --json" before gh had looked at the
+  // repository at all, so the pipeline had never opened a pull request in any environment.
+  const host = stripComments(await readFile(rehydrate('src/delivery/github.ts'), 'utf8'));
+  const from = host.indexOf("'pr', 'create'");
+  const to = host.indexOf("'pr', 'comment'");
+  assert(from >= 0 && to > from, 'openPr must call `gh pr create`, before commentOnPr');
+  const create = host.slice(from, to);
+  assert(!/'--json'/.test(create), 'gh pr create takes no --json — the URL is the parsed result');
+  assert(/res\.stdout/.test(create), 'and that result is read from stdout, where the data is');
+});
+
 check('a runtime-built delivery argument is never handed to a shell', async () => {
   // The commit message and the PR body are built at run time, spaces and newlines included, and a
   // shell re-parses those into separate argv entries. Stage 8's commit died with four unknown
