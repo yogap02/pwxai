@@ -121,11 +121,28 @@ curl -s "https://api.telegram.org/bot$TELEGRAM_API_KEY/getUpdates"
 On GitHub, `TELEGRAM_API_KEY` goes in **secrets** and `TELEGRAM_CHAT_ID` in **variables** (a chat id
 is not a credential; a bot token is).
 
-The message carries what the summary carries, because a chat is read out of context: the status and
-why, the source PR, the tier and the grep that actually ran **and what that filter left out**, the
-per-domain pass/fail, what this run wrote or could not cover, and the PR when stage 8 opened one.
-There is no separate configuration for what it says — a report that could disagree with the summary
-would be the same smaller green in another medium.
+The message carries what the summary carries, because a chat is read out of context: the source PR,
+the tier and the grep that actually ran **and what that filter left out**, the per-domain pass/fail,
+what this run wrote or could not cover, and the PR when stage 8 opened one. There is no separate
+configuration for what it says — a report that could disagree with the summary would be the same
+smaller green in another medium.
+
+It opens with **two labelled statuses**, because a failed test and a broken pipeline are different
+problems and one verdict for both sends someone to fix the wrong one:
+
+```
+Pipeline run 36bed620 · @core scope only
+
+Testing Status: ❌ 1 test failed
+Pipeline Status: ✅ Nothing needs attention
+
+Not a verdict on the whole suite — this is the @core scope; tests outside it were not run.
+```
+
+`Testing Status` is the product — what the browser run found. `Pipeline Status` is the process —
+whether the run did its job. A failed test leaves every stage `succeeded`, which is why the two never
+share a colour. The scope is named in the first line when the run was narrowed, and the line under
+it says what a narrowed pass is *not*, so `✅` can never read as "the suite is green".
 
 A message that cannot be sent **fails the stage** — non-fatal, so the run's results still stand and
 the run still exits 0 — rather than reporting a success, because a report nobody received must not

@@ -40,36 +40,78 @@ export function telegramConfig(): TelegramConfig | null {
   return { token, chatId };
 }
 
-/**
- * The run in one word, with the reason. `failed` covers a failed stage and a failed test
- * alike, because that is what the reader of a chat message acts on; `attention` is
- * everything that is worth knowing but not a failure.
- *
- * A run that recorded no browser result is `attention`, not `passed`: nothing was verified,
- * and a green tick for "we did not look" is the lie this repo exists to avoid.
- */
-export function runVerdict(manifest: RunManifest): { verdict: RunVerdict; reason: string } {
-  const failedStage = manifest.stages.find((s) => s.status === 'failed');
-  if (failedStage) return { verdict: 'failed', reason: `stage \`${failedStage.name}\` failed` };
+export type StatusLevel = 'failed' | 'attention' | 'none' | 'ok';
 
+export interface StatusLine {
+  level: StatusLevel;
+  /** Short, because it is the headline whenever it is the worst of the two. */
+  label: string;
+}
+
+export interface RunStatus {
+  /** The process: did the run do its job? */
+  pipeline: StatusLine;
+  /** The product: what the browser run found. */
+  testing: StatusLine;
+}
+
+const RANK: Record<StatusLevel, number> = { failed: 3, attention: 2, none: 2, ok: 0 };
+
+/** Worst of the two, for the rare caller that needs one answer. A tie goes to the pipeline. */
+export function worstLevel(a: StatusLevel, b: StatusLevel): StatusLevel {
+  return RANK[a] >= RANK[b] ? a : b;
+}
+
+export function statusEmoji(level: StatusLevel): string {
+  if (level === 'failed') return '❌';
+  return level === 'ok' ? '✅' : '⚠️';
+}
+
+/**
+ * The **process**: did the pipeline do its job?
+ *
+ * A failed test is deliberately NOT this. There are two statuses because a failed test leaves
+ * every stage `succeeded` — the suite went red and nothing in the run went wrong — and folding
+ * them into one verdict is how a red suite gets read as a broken pipeline, and a broken
+ * pipeline as a red suite. Both misreadings cost a person the same thing: they go and fix the
+ * wrong one.
+ */
+export function pipelineStatus(manifest: RunManifest): StatusLine {
+  const failedStage = manifest.stages.find((s) => s.status === 'failed');
+  if (failedStage) return { level: 'failed', label: `stage \`${failedStage.name}\` failed` };
+
+  const notes: string[] = [];
+  const blocked = manifest.domains.reduce((n, d) => n + d.unbuildable.length, 0);
+  if (blocked > 0) notes.push(`${blocked} scenario(s) blocked`);
+  const degraded = manifest.stages.filter((s) => (s.degradation ?? []).length > 0);
+  if (degraded.length > 0) notes.push(`degraded: ${degraded.map((s) => s.name).join(', ')}`);
+
+  return notes.length === 0
+    ? { level: 'ok', label: 'Nothing needs attention' }
+    : { level: 'attention', label: notes.join(' · ') };
+}
+
+/**
+ * The **product**: what the browser run found.
+ *
+ * A run that recorded no result at all is `none`, not a pass: nothing was verified, and a green
+ * tick for "we did not look" is the lie the colour must not tell.
+ */
+export function testingStatus(manifest: RunManifest): StatusLine {
   const totals = playwrightTotals(manifest);
-  if (totals === null) return { verdict: 'attention', reason: 'no test run recorded' };
+  if (totals === null) return { level: 'none', label: 'no test run was recorded' };
   if (totals.failed > 0) {
     return {
-      verdict: 'failed',
-      reason: `${totals.failed} test${totals.failed === 1 ? '' : 's'} failed`,
+      level: 'failed',
+      label: `${totals.failed} test${totals.failed === 1 ? '' : 's'} failed`,
     };
   }
+  if (totals.flaky > 0) return { level: 'attention', label: `${totals.flaky} test(s) flaky` };
+  return { level: 'ok', label: `${totals.passed} passed · 0 failed` };
+}
 
-  const blocked = manifest.domains.reduce((n, d) => n + d.unbuildable.length, 0);
-  if (blocked > 0) {
-    return { verdict: 'attention', reason: `${blocked} scenario(s) blocked` };
-  }
-  const degraded = manifest.stages.filter((s) => (s.degradation ?? []).length > 0);
-  if (degraded.length > 0) {
-    return { verdict: 'attention', reason: `degraded: ${degraded.map((s) => s.name).join(', ')}` };
-  }
-  return { verdict: 'passed', reason: `${totals.passed} passed · 0 failed` };
+export function runStatus(manifest: RunManifest): RunStatus {
+  return { pipeline: pipelineStatus(manifest), testing: testingStatus(manifest) };
 }
 
 /**
@@ -92,8 +134,6 @@ function narrowScope(manifest: RunManifest): string | null {
   if (tiers.length > 1) return 'tiered';
   return tiers[0] === 'regression' ? null : tiers[0]!;
 }
-
-export type RunVerdict = 'failed' | 'attention' | 'passed';
 
 export interface ReportOptions {
   /** The repo the change under test lives in, for the source line. */
@@ -127,17 +167,19 @@ function fitTelegram(markdown: string): string {
 }
 
 function reportMarkdown(manifest: RunManifest, opts: ReportOptions): string {
-  const { verdict, reason } = runVerdict(manifest);
-  const emoji = verdict === 'failed' ? '❌' : verdict === 'attention' ? '⚠️' : '✅';
+  const status = runStatus(manifest);
   const scope = narrowScope(manifest);
   const out: string[] = [
-    scope === null
-      ? `${emoji} **Pipeline run \`${manifest.runId}\`** — ${reason}`
-      : `${emoji} **Pipeline run \`${manifest.runId}\`** — ${reason} · \`${scope}\` scope only`,
+    `**Pipeline run \`${manifest.runId}\`**${scope === null ? '' : ` · \`${scope}\` scope only`}`,
+    '',
+    // Two labelled statuses rather than one verdict, and Testing first: that is what a reader
+    // acts on, and a preview leading with "Nothing needs attention" while a test failed is the
+    // exact misreading the labels exist to prevent.
+    `**Testing Status:** ${statusEmoji(status.testing.level)} ${status.testing.label}`,
+    `**Pipeline Status:** ${statusEmoji(status.pipeline.level)} ${status.pipeline.label}`,
     '',
   ];
   if (scope !== null) {
-    // Directly under the tick, because that is the line a reader believes.
     out.push(
       `**Not a verdict on the whole suite** — this is the \`${scope}\` scope; tests outside it were not run.`,
       '',

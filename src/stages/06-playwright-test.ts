@@ -94,7 +94,13 @@ export function createPlaywrightTestStage(grep: string): StageSpec {
         ctx.recordDegradation('playwright-test', 'no JSON report written — pass/fail unknown');
       }
 
-      if (!res.ok) {
+      // A nonzero exit is what a FAILING TEST does, so it is not itself a process defect: the
+      // result is recorded as a result (that is the testing status), and calling it a
+      // degradation made a red suite read as a broken pipeline — two statuses that a reader
+      // must be able to tell apart, because the fix for one is not the fix for the other.
+      // What IS a process problem is an exit the recorded failures do not explain: a runner
+      // that crashed, or an exit with nothing failed to show for it.
+      if (!res.ok && stats !== null && stats.failed === 0) {
         ctx.recordDegradation('playwright-test', `playwright exited ${res.exitCode}`);
       }
       dbg('playwright-test', 'done', {

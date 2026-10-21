@@ -49,9 +49,10 @@ import { redact } from '../core/util/redaction.js';
 import { env } from '../core/util/env.js';
 import {
   buildReportMessage,
-  runVerdict,
+  runStatus,
   sendReportMessage,
   telegramConfig,
+  worstLevel,
 } from '../delivery/telegram.js';
 
 let passed = 0;
@@ -2398,7 +2399,14 @@ check('the report channel carries the result and the scope, so a narrowed run ca
     msg.includes('The pricing section lists all six packages'),
     'a blocked scenario must be named, not only counted',
   );
-  assert(msg.startsWith('❌'), 'a failed test means a failure headline, not a tick');
+  assert(
+    msg.includes('<b>Testing Status:</b> ❌ 1 test failed'),
+    'the product status must be stated, labelled, and red when a test failed',
+  );
+  assert(
+    msg.includes('<b>Pipeline Status:</b> ⚠️ 1 scenario(s) blocked'),
+    'the process status must be labelled too, and it must name the process problem — the blocked scenario — rather than the failed test',
+  );
   assert(
     msg.includes('<code>smoke</code> scope'),
     'a narrowed run must name its scope in the headline, where the tick is',
@@ -2453,11 +2461,54 @@ check('the report channel carries the result and the scope, so a narrowed run ca
   // The verdict is the one thing the two readers must agree on, and a run that recorded no
   // browser result is `attention`: a green tick for "nothing was verified" is the lie the
   // delivery colour must not tell.
-  const quiet = newManifest('check-verdict');
-  assert(runVerdict(quiet).verdict === 'attention', 'no test run recorded is not a pass');
-  const red = sampleManifest('check-verdict-2');
-  assert(runVerdict(red).verdict === 'failed', 'a failed test makes the run a failure');
-  assert(runVerdict(red).reason.includes('1 test failed'), 'the verdict must say why, in numbers');
+  // The two statuses are independent, and that is the whole point of labelling them: a failed
+  // test must never be reported as a broken pipeline, and a broken pipeline must never be
+  // reported as a red suite. Both conflations send someone to fix the wrong thing.
+  const quiet = newManifest('check-status-none');
+  assert(runStatus(quiet).testing.level === 'none', 'no test run recorded is not a pass');
+  assert(runStatus(quiet).pipeline.level === 'ok', 'and the process did nothing wrong');
+
+  const red = sampleManifest('check-status-red');
+  // Clear the blocked scenario: it is what colours the PROCESS status, and this case is about
+  // a run whose stages all went fine while the product did not.
+  red.domains[0]!.unbuildable = [];
+  assert(runStatus(red).testing.level === 'failed', 'a failed test is the product status');
+  assert(
+    runStatus(red).pipeline.level === 'ok',
+    'and NOT the process one: a failing test leaves every stage succeeded',
+  );
+  assert(runStatus(red).testing.label.includes('1 test failed'), 'the status must say why, in numbers');
+
+  const broken = sampleManifest('check-status-broken');
+  broken.stages.push({ name: 'git', status: 'failed' });
+  assert(runStatus(broken).pipeline.level === 'failed', 'a failed stage is the process status');
+  assert(
+    runStatus(broken).testing.level === 'failed',
+    'the two are read independently — fixing one verdict must not lose the other',
+  );
+  assert(
+    worstLevel('ok', 'failed') === 'failed' && worstLevel('attention', 'failed') === 'failed',
+    'the worst of the two is what an overall colour must use',
+  );
+});
+
+check('a failing test is a result, not a process degradation', async () => {
+  // This is the one place the two statuses get conflated, and it is worth a check because the
+  // symptom is silent and plausible: stage 6 recorded EVERY nonzero exit as a degradation, and
+  // a failing test is the ordinary reason Playwright exits 1 — so a red suite turned the
+  // PROCESS status yellow too, and "Pipeline Status: degraded: playwright-test" pointed a reader
+  // at the pipeline for a problem in the product.
+  const src = stripComments(
+    await readFile(rehydrate('src/stages/06-playwright-test.ts'), 'utf8'),
+  );
+  assert(
+    /!res\.ok\s*&&\s*stats !== null\s*&&\s*stats\.failed === 0/.test(src),
+    'the exit code may only be a degradation when the recorded failures do not explain it',
+  );
+  assert(
+    /no JSON report written — pass\/fail unknown/.test(src),
+    'and an unreadable report still is one: an unknown result is a process problem, not a test result',
+  );
 });
 
 check('a report that did not arrive is named, and the token never leaves the request', async () => {

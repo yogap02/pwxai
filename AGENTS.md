@@ -146,6 +146,20 @@ gh workflow run test-pipeline -f from_scenarios=true   # start a run by hand, no
   carry the URL. It runs last because it reports what stage 8 delivered, and it is reachable as
   `npm run stage:9`: re-sending a report is a real operation, and it reuses the manifest on disk
   instead of re-running a suite.
+- **A report carries two statuses, because a failed test and a broken pipeline are different
+  problems.** `Testing Status` is the product — what the browser run found; `Pipeline Status` is the
+  process — whether the run did its job. They are printed as two labelled lines and never folded
+  into one verdict, because a failed test leaves every stage `succeeded`: the suite went red and
+  nothing in the run went wrong. One combined colour reads a red suite as a broken pipeline and a
+  broken pipeline as a red suite, and both send someone to fix the wrong one. The narrowed-scope
+  rule lives in the same headline: the scope is named there, and the line under it says a narrowed
+  pass is *not* a verdict on the whole suite — the first live report read `✅ passed` for a smoke run
+  whose only red test was tagged `@core` and therefore never ran. The same conflation had to come
+  out one level down, at its source: stage 6 recorded *every* nonzero exit as a degradation, and a
+  failing test is the ordinary reason Playwright exits 1, so a red suite turned the process status
+  yellow too. It now records that only when the recorded failures do not explain the exit — a
+  crashed runner, or an exit with nothing failed to show for it — while an unreadable report stays a
+  degradation, because an unknown result really is a process problem. All of it is self-checked.
 - **The change under test and the repo that works are two things, and were one.** `WORK_REPO_SLUG` is
   the repo the pipeline *writes* to — branch, `git push`, `gh pr create`. The product CICD triggers
   this pipeline after its own deploy and passes the testing context with it, so the PR stage 1 reads

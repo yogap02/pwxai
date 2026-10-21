@@ -17,7 +17,7 @@ import type { StageSpec } from '../core/orchestration/stage-runner.js';
 import { env } from '../core/util/env.js';
 import {
   buildReportMessage,
-  runVerdict,
+  runStatus,
   sendReportMessage,
   telegramConfig,
 } from '../delivery/telegram.js';
@@ -32,7 +32,7 @@ export function createNotifyStage(): StageSpec {
       if (config === null) {
         return 'No report channel configured (TELEGRAM_API_KEY / TELEGRAM_CHAT_ID unset); nothing was sent.';
       }
-      const { verdict } = runVerdict(ctx.manifest);
+      const status = runStatus(ctx.manifest);
       const message = buildReportMessage(ctx.manifest, {
         sourceRepo: env.SOURCE_REPO_SLUG ?? env.WORK_REPO_SLUG,
       });
@@ -43,7 +43,9 @@ export function createNotifyStage(): StageSpec {
         ctx.recordDegradation('notify', outcome.reason);
         throw new Error(`report channel failed: ${outcome.reason}`);
       }
-      return `Reported run ${ctx.manifest.runId} (${verdict}) to chat ${config.chatId}.`;
+      // Both statuses, because the stage output is read during a debug and "failed" alone
+      // cannot say whether the run broke or the product did.
+      return `Reported run ${ctx.manifest.runId} to chat ${config.chatId} (testing: ${status.testing.level} · pipeline: ${status.pipeline.level}).`;
     },
   };
 }
