@@ -55,7 +55,10 @@ export function runVerdict(manifest: RunManifest): { verdict: RunVerdict; reason
   const totals = playwrightTotals(manifest);
   if (totals === null) return { verdict: 'attention', reason: 'no test run recorded' };
   if (totals.failed > 0) {
-    return { verdict: 'failed', reason: `${totals.failed} test(s) failed` };
+    return {
+      verdict: 'failed',
+      reason: `${totals.failed} test${totals.failed === 1 ? '' : 's'} failed`,
+    };
   }
 
   const blocked = manifest.domains.reduce((n, d) => n + d.unbuildable.length, 0);
@@ -66,7 +69,28 @@ export function runVerdict(manifest: RunManifest): { verdict: RunVerdict; reason
   if (degraded.length > 0) {
     return { verdict: 'attention', reason: `degraded: ${degraded.map((s) => s.name).join(', ')}` };
   }
-  return { verdict: 'passed', reason: 'no failures, nothing degraded' };
+  return { verdict: 'passed', reason: `${totals.passed} passed · 0 failed` };
+}
+
+/**
+ * The scope this run actually had, or null when it ran everything.
+ *
+ * This exists because of the one reading a report must not invite: "6 passed" from a smoke
+ * run is true, and what a reader takes from it is that the suite is green — while the test
+ * that everyone knows is red sits outside the scope, untested. `regression` is the whole
+ * suite and is not a narrowing; a tier mix is named rather than guessed.
+ */
+function narrowScope(manifest: RunManifest): string | null {
+  // The operator's own filter, named literally: `@core` says more to a reader than "override".
+  if (manifest.grepOverride !== null) return manifest.grepOverride;
+  const tiers = [
+    ...new Set(
+      manifest.domains.map((d) => d.tier).filter((t): t is string => t !== null),
+    ),
+  ];
+  if (tiers.length === 0) return null;
+  if (tiers.length > 1) return 'tiered';
+  return tiers[0] === 'regression' ? null : tiers[0]!;
 }
 
 export type RunVerdict = 'failed' | 'attention' | 'passed';
@@ -105,7 +129,20 @@ function fitTelegram(markdown: string): string {
 function reportMarkdown(manifest: RunManifest, opts: ReportOptions): string {
   const { verdict, reason } = runVerdict(manifest);
   const emoji = verdict === 'failed' ? '❌' : verdict === 'attention' ? '⚠️' : '✅';
-  const out: string[] = [`${emoji} **Pipeline run \`${manifest.runId}\`** — ${reason}`, ''];
+  const scope = narrowScope(manifest);
+  const out: string[] = [
+    scope === null
+      ? `${emoji} **Pipeline run \`${manifest.runId}\`** — ${reason}`
+      : `${emoji} **Pipeline run \`${manifest.runId}\`** — ${reason} · \`${scope}\` scope only`,
+    '',
+  ];
+  if (scope !== null) {
+    // Directly under the tick, because that is the line a reader believes.
+    out.push(
+      `**Not a verdict on the whole suite** — this is the \`${scope}\` scope; tests outside it were not run.`,
+      '',
+    );
+  }
 
   const repo = opts.sourceRepo === undefined ? '' : `\`${opts.sourceRepo}\` `;
   out.push(

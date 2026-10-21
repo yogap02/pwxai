@@ -2399,8 +2399,25 @@ check('the report channel carries the result and the scope, so a narrowed run ca
     'a blocked scenario must be named, not only counted',
   );
   assert(msg.startsWith('❌'), 'a failed test means a failure headline, not a tick');
+  assert(
+    msg.includes('<code>smoke</code> scope'),
+    'a narrowed run must name its scope in the headline, where the tick is',
+  );
+  assert(
+    msg.includes('Not a verdict on the whole suite'),
+    'a tick on a narrowed run must be qualified next to itself — a scope line further down is what a reader believes after they have already believed the tick',
+  );
   assert(!msg.includes('**'), 'the report is sent as HTML; raw markdown renders as literal asterisks');
   assert(msg.includes('<b>') && msg.includes('<code>'), 'the report must actually use the markup');
+
+  // The other half of the same rule: a run of everything must not cry narrowing.
+  const whole = sampleManifest('check-whole-suite');
+  whole.domains[0]!.tier = 'regression';
+  const wholeMsg = buildReportMessage(whole, {});
+  assert(
+    !wholeMsg.includes('Not a verdict') && !wholeMsg.includes('scope only'),
+    'a run of the whole suite is a verdict on the suite, and must not say otherwise',
+  );
 
   // A scenario title is arbitrary text, so it must not be able to close a tag or open one.
   const risky = sampleManifest('check-escape');
@@ -2440,7 +2457,7 @@ check('the report channel carries the result and the scope, so a narrowed run ca
   assert(runVerdict(quiet).verdict === 'attention', 'no test run recorded is not a pass');
   const red = sampleManifest('check-verdict-2');
   assert(runVerdict(red).verdict === 'failed', 'a failed test makes the run a failure');
-  assert(runVerdict(red).reason.includes('1 test'), 'the verdict must say why');
+  assert(runVerdict(red).reason.includes('1 test failed'), 'the verdict must say why, in numbers');
 });
 
 check('a report that did not arrive is named, and the token never leaves the request', async () => {
