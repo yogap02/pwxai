@@ -37,12 +37,20 @@ export function createTestPlanStage(model: ModelClient): StageSpec {
       // entirely — asking a model to pick a scope and then discarding the answer
       // costs a call and leaves a reason in the report that nothing acted on.
       const override = env.TEST_GREP ?? null;
-      if (override !== null && env.CI !== undefined) {
-        // The one case worth shouting about: an override on a CI run is almost
-        // always a leftover value rather than a decision someone made just now.
+      // Where the override came from. The workflow fills this in when it passes the value
+      // straight through from the operator's run-time input; anything else means the value
+      // arrived from the environment, which on a CI run is a leftover rather than a
+      // decision someone made just now. Read from `process.env` rather than through `env`:
+      // that module is configuration, and this is per-run plumbing — the `HEAL_RUN_ID` class.
+      const overrideFromInput = process.env['TEST_GREP_SOURCE'] === 'input';
+      if (override !== null && env.CI !== undefined && !overrideFromInput) {
+        // Not a refusal and not an error: a stray value narrowing a CI run is exactly the
+        // silent smaller-green this repo exists to prevent, so it is named. An override a
+        // person typed into the manual trigger is NOT this — it is the override working as
+        // intended, and the summary already reports it as one.
         ctx.recordDegradation(
           'test-plan',
-          `TEST_GREP="${override}" is overriding the plan while CI is set — an override in CI is almost certainly a leftover, not a decision`,
+          `TEST_GREP="${override}" is overriding the plan on a CI run and did not come from a run-time input — a leftover value rather than a decision`,
         );
       }
 
@@ -70,7 +78,7 @@ export function createTestPlanStage(model: ModelClient): StageSpec {
           dbg('test-plan', 'agent-failed', { error: proposalFailure });
         }
       } else {
-        dbg('test-plan', 'override', { grep: override, ci: env.CI !== undefined });
+        dbg('test-plan', 'override', { grep: override, ci: env.CI !== undefined, input: overrideFromInput });
       }
 
       // Titles generated this run — the enforced floor, re-derived from the manifest
@@ -114,7 +122,9 @@ export function createTestPlanStage(model: ModelClient): StageSpec {
         outcome.source === 'human'
           ? `Scope: human override (planner agent skipped)`
           : `Scope: ${outcome.tier}${outcome.source === 'planner' ? ' (chosen by the planner agent)' : ' (widened by a fallback)'}`,
-        outcome.source === 'human' ? `Why: TEST_GREP was supplied — the floor is not applied` : '',
+        outcome.source === 'human'
+          ? `Why: TEST_GREP was supplied${overrideFromInput ? ' for this run' : ''} — the floor is not applied`
+          : '',
         proposalReason.length > 0 ? `Why: ${proposalReason}` : '',
         outcome.grep ? `Grep: ${outcome.grep}` : `Grep: (full suite)`,
       ].filter((l) => l.length > 0);

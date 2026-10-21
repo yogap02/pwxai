@@ -173,12 +173,15 @@ gh workflow run test-pipeline -f from_scenarios=true   # start a run by hand, no
 - **Three env registration points**: a variable must exist in the CI definition
   (`.github/workflows/pipeline.yml`), the container environment, and `.env.example`. Tests run
   *inside* the container, so a value set only in a CI step shell silently misses them. That is about
-  *configuration*, read through `core/util/env.ts`. Two variables are deliberately not among these:
+  *configuration*, read through `core/util/env.ts`. Three variables are deliberately not among these:
   `HEAL_RUN_ID` is per-run plumbing that stage 6 passes into the Playwright child process, so it
-  cannot be missing where the tests run; `TEST_GREP` is an **operator override** — a standing value in
-  the CI definition would pin every run to one person's filter, silently. It is therefore a
-  `workflow_dispatch` **input**, not a job-level `env`, and `npm run self-checks` fails unless each
-  assignment of it is sourced from `${{ inputs.* }}` (a bare `${TEST_GREP:-}` in a log line is a
+  cannot be missing where the tests run; `TEST_GREP_SOURCE` is the same class — derived by the
+  workflow per run so stage 5 can tell an override a person typed into the manual trigger from a
+  stray value narrowing a CI run, and read from `process.env` rather than through `env` for exactly
+  that reason; `TEST_GREP` is an **operator override** — a standing value in the CI definition would
+  pin every run to one person's filter, silently. It is therefore a `workflow_dispatch` **input**,
+  not a job-level `env`, and `npm run self-checks` fails unless each assignment of it (and of
+  `TEST_GREP_SOURCE`) is sourced from `${{ inputs.* }}` (a bare `${TEST_GREP:-}` in a log line is a
   reference, not an assignment, and is allowed — the distinction is the point of the check).
 - **A human's `TEST_GREP` is absolute, and the only thing the floor steps aside for.** It *is* the
   filter: stage 5 skips the planner agent entirely (asking a model for a scope you are about to
@@ -188,7 +191,11 @@ gh workflow run test-pipeline -f from_scenarios=true   # start a run by hand, no
   silent: `grepOverride` is persisted so the summary reports an *override* rather than a planned scope
   (otherwise a `grep: @smoke` read six months later misattributes the decision to the agent), it names
   what the override excluded, and it shouts about any test **this run wrote** that the override drops —
-  the one outcome the floor exists to prevent, now reachable and therefore announced.
+  the one outcome the floor exists to prevent, now reachable and therefore announced. What *is*
+  announced about the override itself is a stray one: on a CI run, an override that did not come from
+  a run-time input is named as a leftover, because a value nobody typed narrowing the run is the
+  silent smaller-green again — whereas one a person typed into the manual trigger is reported as the
+  decision it is, not misattributed as a leftover.
 - **Additive-only agent writes** + `src/agent/write-scope-guard.ts` reverts out-of-scope or
   destructive edits. The builder adds; the healer repairs. Two writers never touch the same lines.
 - **A heal is an exact string substitution, so what it rewrites must be expressible as source text.**

@@ -202,7 +202,9 @@ planned scope), names what it left out, and **shouts** when the override exclude
 `TEST_GREP` is never a **standing value** in the CI definition — that would pin every run to one
 person's filter, silently, and `npm run self-checks` fails unless every assignment of it is sourced
 from a run-time input. On the manual trigger it *is* such an input, because a form a person fills in
-per run is the same instruction as a command they typed, just delivered differently.
+per run is the same instruction as a command they typed, just delivered differently — and a CI run can
+therefore say which it was. An override that arrived from anywhere else is named as a *leftover*
+rather than accepted as a decision, which is the one thing about an override worth flagging.
 
 That is what makes a scope a tag filter rather than a title filter:
 

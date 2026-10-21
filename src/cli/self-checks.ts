@@ -2005,28 +2005,34 @@ check('TEST_GREP is an operator override, never a standing CI default', async ()
   assert(example.includes('TEST_GREP'), '.env.example must document the override');
   // What is forbidden is a STANDING SOURCE, and only an assignment has one. Two shapes
   // assign it, and only these:
-  //     TEST_GREP: <value>        YAML block style — how step env is set here
-  //     TEST_GREP=<value> cmd     shell prefix assignment
+  //     NAME: <value>        YAML block style — how step env is set here
+  //     NAME=<value> cmd     shell prefix assignment
   // A bare `${TEST_GREP:-}` or `$TEST_GREP` in a log line assigns nothing and is allowed,
   // so matching every mention would fail the workflow's own progress echo.
-  const standingValue = (line: string): string | null => {
-    const yaml = /^\s*TEST_GREP\s*:\s*(.*)$/.exec(line);
+  //
+  // TEST_GREP_SOURCE is checked with it because hardcoding it to 'input' would silently
+  // switch off stage 5's leftover detection: every stray override would then read as a
+  // deliberate one, which is a green report for a run nobody meant to narrow.
+  const assignmentsOf = (name: string, line: string): string | null => {
+    const yaml = new RegExp(`^\\s*${name}\\s*:\\s*(.*)$`).exec(line);
     if (yaml) return yaml[1] ?? '';
-    const shell = /(?:^|[\s;(])TEST_GREP=(\S.*)$/.exec(line);
+    const shell = new RegExp(`(?:^|[\\s;(])${name}=(\\S.*)$`).exec(line);
     if (shell) {
       const value = shell[1] ?? '';
-      if (/^\$\{?TEST_GREP\b/.test(value)) return null; // `TEST_GREP=$TEST_GREP` is a self-reference, not a source
+      if (new RegExp(`^\\$\\{?${name}\\b`).test(value)) return null; // a self-reference is not a source
       return value;
     }
     return null;
   };
-  for (const line of workflow.split('\n')) {
-    const value = standingValue(line);
-    if (value === null) continue;
-    assert(
-      /\$\{\{\s*inputs\./.test(value),
-      `TEST_GREP may only be assigned from a run-time dispatch input, never a vars./secret/literal value: ${line.trim()}`,
-    );
+  for (const name of ['TEST_GREP', 'TEST_GREP_SOURCE']) {
+    for (const line of workflow.split('\n')) {
+      const value = assignmentsOf(name, line);
+      if (value === null) continue;
+      assert(
+        /\$\{\{\s*inputs\./.test(value),
+        `${name} may only be assigned from a run-time input, never a vars./secret/literal value: ${line.trim()}`,
+      );
+    }
   }
   // And the manual door has to exist, or a human has no way in without a PR.
   assert(/workflow_dispatch:/.test(workflow), 'the workflow must be startable by hand');

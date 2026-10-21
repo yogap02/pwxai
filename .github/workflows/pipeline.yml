@@ -97,6 +97,12 @@ jobs:
           # one person's filter and the pipeline would quietly stop planning. An empty
           # input reads as unset (core/util/env.ts), so no override is applied.
           TEST_GREP: ${{ inputs.test_grep }}
+          # Whether that value came from the operator at run time. Stage 5 uses it to tell
+          # a decision from a leftover: a stray TEST_GREP narrowing a CI run is the silent
+          # smaller-green this pipeline exists to prevent, while one typed into the manual
+          # trigger is the override working as intended. 'environment' is the honest
+          # default — nothing in this workflow supplies the value any other way.
+          TEST_GREP_SOURCE: ${{ inputs.test_grep != '' && 'input' || 'environment' }}
         run: |
           set -euo pipefail
           args=()

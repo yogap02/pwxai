@@ -209,6 +209,10 @@ A manual run has no PR context, so stage 1 needs either `-f pr=<number>` or
 `-f from_scenarios=true`; given neither, the run stops rather than proceeding against an
 empty change set.
 
+A CI run can also tell the two apart. An override that arrived from somewhere other than a
+run-time input is named as a *leftover* rather than accepted as a decision — the same silent
+smaller-green, one layer up.
+
 ---
 
 ## The files that carry state
