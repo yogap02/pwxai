@@ -3,14 +3,16 @@ name: test-pipeline
 # Self-checks run immediately before the pipeline, in the same command
 # (pipeline-pattern.md §3, "Cheap checks gate expensive spend").
 
+# Dispatch-only, deliberately: the pipeline runs on a DEPLOYMENT, never on a PR of its own.
+#
+# The product CICD triggers this after its deploy and passes the testing context with it —
+# `pr` (the PR whose change is under test) and `source_repo` (the repo that PR lives in).
+# There is deliberately NO `pull_request` trigger on this repo: stage 8 OPENS a PR here, so
+# a `pull_request` trigger would run the pipeline against its own generated tests, generate
+# more, and open a further PR — a loop fed by every delivery.
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-
-  # Manual run. A PR-triggered run has its issue + diff handed to it; a manual run
-  # has no PR context, so `--pr` becomes optional and `from_scenarios` replaces it.
-  # Inputs are typed by a person at run time — which is why `test_grep` may live
-  # here but never in the `env:` block below (see its description).
+  # Manual run, and the entry the product CICD calls. Inputs are typed at run time — which
+  # is why `test_grep` may live here but never in the `env:` block below.
   workflow_dispatch:
     inputs:
       pr:
@@ -66,17 +68,15 @@ jobs:
       # return null content unless this is set to none/minimal.
       MODEL_REASONING_EFFORT: ${{ vars.MODEL_REASONING_EFFORT }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # Where the tests are delivered. `github.repository` is the repo this workflow runs
-      # in, which is the deliverer by construction — the tests are committed, pushed and
-      # PR'd here, never into the product repo.
-      REPO_SLUG: ${{ github.repository }}
-      # The repo whose CHANGE is under test, when it is not this one: a product repo
-      # dispatches this pipeline after its own deploy, so stage 1 reads its PR while
-      # delivery stays here. Empty = this repo (a PR in this repo).
+      # The WORK repo: `github.repository` is the repo this workflow runs in, so it is the
+      # one the tests are committed, pushed and PR'd to — never the product repo.
+      WORK_REPO_SLUG: ${{ github.repository }}
+      # The SOURCE repo, supplied by the product CICD with the testing context: whose change
+      # is under test. Empty = this repo.
       SOURCE_REPO_SLUG: ${{ inputs.source_repo }}
-      # A PR run knows its base branch; a manual run does not. Empty is correct here
-      # rather than harmful: stage 8 falls back to `main` when SOURCE_BRANCH is unset.
-      SOURCE_BRANCH: ${{ github.event.pull_request.base.ref || inputs.base_branch }}
+      # The branch the delivery branch is based on. Empty is correct rather than harmful:
+      # stage 8 uses `main` when SOURCE_BRANCH is unset.
+      SOURCE_BRANCH: ${{ inputs.base_branch }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -100,7 +100,9 @@ jobs:
         env:
           # Tests run inside the container — a value set only in this step's
           # shell never reaches them. Register at the job env level (above).
-          TCGEN_PR: ${{ github.event.pull_request.number || inputs.pr }}
+          # The testing context the product CICD hands over: the PR whose change is under
+          # test, read from SOURCE_REPO_SLUG.
+          TCGEN_PR: ${{ inputs.pr }}
           TCGEN_FROM_SCENARIOS: ${{ inputs.from_scenarios }}
           TCGEN_DRY_RUN: ${{ inputs.dry_run }}
           # The operator's override, and ONLY theirs: sourced from a run-time input,

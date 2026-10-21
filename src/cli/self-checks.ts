@@ -2265,30 +2265,67 @@ check('debug is registered where a run can read it, and is actually emitted', as
 
 // -----------------------------------------------------------------------------
 
-check('a source repo can differ from the repo that delivers', async () => {
-  // The product repo dispatches this pipeline after its own deploy, so the PR stage 1 reads
-  // lives there while the branch, push and PR happen here. One slug cannot serve both:
-  // reading the change with the delivery slug looks for PR #N in the wrong repository —
-  // failing, or worse, reading a number that happens to exist in both.
+check('a source repo can differ from the work repo that delivers', async () => {
+  // The product CICD triggers this pipeline after its own deploy and passes the testing
+  // context, so the PR stage 1 reads lives in the SOURCE repo while the branch, push and PR
+  // happen in the WORK repo. One slug cannot serve both: reading the change with the work
+  // slug looks for PR #N in the wrong repository — failing, or worse, reading a number that
+  // happens to exist in both and testing the wrong change under a green report.
   const github = stripComments(await readFile(rehydrate('src/delivery/github.ts'), 'utf8'));
   const fetchSource = github.slice(github.indexOf('fetchSource('), github.indexOf('createBranch('));
+  const openPr = github.slice(github.indexOf('openPr('), github.indexOf('private async gh('));
+  const commentOnPr = github.slice(github.indexOf('commentOnPr('), github.indexOf('private async gh('));
+  // Everything that addresses the CHANGE UNDER TEST resolves the source repo…
   assert(fetchSource.includes('sourceRepoSlug()'), 'fetchSource must read the SOURCE repo slug');
   assert(
-    !fetchSource.includes('requireRepoSlug()'),
-    'fetchSource must not read the change under test from the DELIVERY repo',
+    commentOnPr.includes('sourceRepoSlug()'),
+    'a run reports back to the SOURCE PR it analysed, so commentOnPr must resolve the source repo',
   );
-  const openPr = github.slice(github.indexOf('openPr('), github.indexOf('private async gh('));
-  assert(openPr.includes('requireRepoSlug()'), 'openPr must open the PR against the DELIVERY repo');
+  assert(
+    !commentOnPr.includes('requireWorkRepoSlug()'),
+    'a comment on the source PR must not be addressed to the work repo — that PR number means another change there',
+  );
+  // …and exactly one method resolves the WORK repo, because exactly one method writes to it.
+  assert(openPr.includes('requireWorkRepoSlug()'), 'openPr must open the PR in the WORK repo');
+  assert(
+    !fetchSource.includes('requireWorkRepoSlug()'),
+    'fetchSource must not read the change under test from the WORK repo',
+  );
+  assert(
+    github.includes('env.SOURCE_REPO_SLUG ?? requireWorkRepoSlug()'),
+    'the source repo must default to the work repo — the single-repo case needs no config',
+  );
 
-  // Registered where a run can read it: CI definition, container env, .env.example.
+  // Both are registered where a run can read them: CI definition, container env, .env.example.
   const example = await readFile(rehydrate('.env.example'), 'utf8');
   const workflow = await readFile(rehydrate('.github/workflows/pipeline.yml'), 'utf8');
-  assert(example.includes('SOURCE_REPO_SLUG'), '.env.example must document SOURCE_REPO_SLUG');
-  assert(workflow.includes('SOURCE_REPO_SLUG'), 'the CI definition must register SOURCE_REPO_SLUG');
   const envSource = await readFile(rehydrate('src/core/util/env.ts'), 'utf8');
+  for (const name of ['WORK_REPO_SLUG', 'SOURCE_REPO_SLUG'] as const) {
+    assert(example.includes(name), `.env.example must document ${name}`);
+    assert(workflow.includes(name), `the CI definition must register ${name}`);
+    assert(
+      envSource.includes(`optionalEnv('${name}')`),
+      `env.ts must read ${name} through optionalEnv`,
+    );
+  }
+});
+
+check('the pipeline never runs on a pull request of its own work repo', async () => {
+  // Stage 8 OPENS a PR in the work repo. That is why this workflow must not be triggerable
+  // by one: a `pull_request` trigger here would run the pipeline against the generated tests
+  // it just opened for review, generate more from that diff, and open a further PR — a loop
+  // fed by every delivery, each round under a green report. The run happens on a DEPLOYMENT,
+  // triggered by the product CICD with its testing context.
+  const workflow = await readFile(rehydrate('.github/workflows/pipeline.yml'), 'utf8');
+  const onBlock = workflow.slice(workflow.indexOf('\non:'), workflow.indexOf('\npermissions:'));
   assert(
-    envSource.includes("optionalEnv('SOURCE_REPO_SLUG')"),
-    'env.ts must read SOURCE_REPO_SLUG through optionalEnv',
+    !onBlock.includes('pull_request'),
+    'the workflow must not trigger on pull_request: stage 8 opens a PR in this repo, so that is a loop',
+  );
+  assert(onBlock.includes('workflow_dispatch'), 'the pipeline must be startable by dispatch');
+  assert(
+    workflow.includes('inputs.pr') && workflow.includes('inputs.source_repo'),
+    'the testing context (pr + source_repo) must arrive as dispatch inputs',
   );
 });
 

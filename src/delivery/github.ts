@@ -61,7 +61,7 @@ export class GitHubCodeHost implements CodeHost {
   }
 
   async openPr(input: PrCreateInput): Promise<PrRef> {
-    const repo = requireRepoSlug();
+    const repo = requireWorkRepoSlug();
     const res = await runStageProcess(
       'gh',
       [
@@ -88,7 +88,10 @@ export class GitHubCodeHost implements CodeHost {
   }
 
   async commentOnPr(prNumber: number, body: string): Promise<void> {
-    const repo = requireRepoSlug();
+    // The SOURCE PR: a run reports back to the change it analysed, so this resolves the repo
+    // that PR lives in. Resolving the work repo here would comment on an unrelated PR number —
+    // or fail — whenever the product CICD triggers a run about its own change.
+    const repo = sourceRepoSlug();
     await this.gh(['pr', 'comment', String(prNumber), '--repo', repo, '--body', body]);
   }
 
@@ -130,19 +133,20 @@ function ghEnv(): Record<string, string> {
 }
 
 /**
- * The repo whose PR stage 1 reads: `SOURCE_REPO_SLUG` when a run is triggered from
- * another repo (the product repo's post-deploy trigger), else the delivery repo — which
- * is what keeps a single-repo run working with no new configuration.
+ * The SOURCE repo: whose PR stage 1 reads. The product CICD passes it with the testing
+ * context when it triggers a run after its own deploy; absent, the run is about this repo.
  */
 function sourceRepoSlug(): string {
-  return env.SOURCE_REPO_SLUG ?? requireRepoSlug();
+  return env.SOURCE_REPO_SLUG ?? requireWorkRepoSlug();
 }
 
-function requireRepoSlug(): string {
-  const slug = env.REPO_SLUG;
+/** The WORK repo: where the branch, the push and the PR happen. Never the product repo. */
+function requireWorkRepoSlug(): string {
+  const slug = env.WORK_REPO_SLUG;
   if (!slug) {
     throw new Error(
-      'REPO_SLUG is not set (owner/name). Register it in the CI definition, container env, and .env.example.',
+      'WORK_REPO_SLUG is not set (owner/name) — the repo the generated tests are delivered to. ' +
+        'Register it in the CI definition, container env, and .env.example.',
     );
   }
   return slug;

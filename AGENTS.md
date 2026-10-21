@@ -129,16 +129,25 @@ gh workflow run test-pipeline -f from_scenarios=true   # start a run by hand, no
   reachable. Its scope lines come from `scopeCoverageLines` (`run-summary.ts`), never a second copy
   of the tier→tag rules: a PR body that quietly disagrees with the summary is the same silent
   smaller-green in a different medium.
-- **The change under test and the repo that delivers are two things, and were one.** `REPO_SLUG` is
-  the deliverer — branch, `git push`, `gh pr create`. The product repo dispatches this pipeline after
-  its own deploy, so the PR stage 1 reads lives over there while everything the pipeline *writes*
-  stays here (we do not put generated tests into the product repo). One slug could not serve both:
-  reading the change with the delivery slug looked for PR #N in the wrong repository. Hence
-  `SOURCE_REPO_SLUG` (optional — absent means `REPO_SLUG`, the single-repo case), read only by
-  `fetchSource`. The same split bit the base branch: `manifest.branch` is the *source* PR's branch,
-  and for a foreign source that ref does not exist here, so `git fetch origin <it>` would fail after
-  the tests had already run. `deliveryBaseBranch()` (stage 8) therefore uses `SOURCE_BRANCH` when
-  set and `main` for a foreign source, and both halves are self-checked.
+- **The change under test and the repo that works are two things, and were one.** `WORK_REPO_SLUG` is
+  the repo the pipeline *writes* to — branch, `git push`, `gh pr create`. The product CICD triggers
+  this pipeline after its own deploy and passes the testing context with it, so the PR stage 1 reads
+  lives in the **source** repo while everything the pipeline writes stays in the **work** repo (we do
+  not put generated tests into the product repo). One slug could not serve both: reading the change
+  with the work slug looked for PR #N in the wrong repository — failing, or worse, reading a number
+  that happens to exist in both and testing the wrong change. Hence `SOURCE_REPO_SLUG` (optional —
+  absent means `WORK_REPO_SLUG`, the single-repo case), read only by `fetchSource`. The same split bit
+  the base branch: `manifest.branch` is the *source* PR's branch, and for a foreign source that ref
+  does not exist in the work repo, so `git fetch origin <it>` would fail after the tests had already
+  run. `deliveryBaseBranch()` (stage 8) therefore uses `SOURCE_BRANCH` when set and `main` for a
+  foreign source, and both halves are self-checked. `REPO_SLUG` was renamed, not aliased: a stale
+  container env fails loudly at the last step, which is the failure mode this repo prefers to silence.
+- **The pipeline runs on a deployment, never on a pull request of its own work repo.** Stage 8 *opens*
+  a PR in the work repo, so a `pull_request` trigger there is a loop: the pipeline would run against
+  the generated tests it just opened for review, generate more from that diff, and open a further PR —
+  each round completing under a green report. The workflow is therefore `workflow_dispatch`-only, and
+  the entry the product CICD calls carries the testing context as inputs (`pr`, `source_repo`); a
+  self-check fails if a `pull_request` trigger reappears.
 - **A child process's stdout is the data; stderr is diagnostics, and our `DEBUG` is not its
   switch.** `runStageProcess` returns `stdout` and the merged `output` separately, and a caller that
   PARSES a result — JSON, a diff, a porcelain listing — must read `stdout`. Merged, a tool's chatter
@@ -249,9 +258,10 @@ gh workflow run test-pipeline -f from_scenarios=true   # start a run by hand, no
   not a job-level `env`, and `npm run self-checks` fails unless each assignment of it (and of
   `TEST_GREP_SOURCE`) is sourced from `${{ inputs.* }}` (a bare `${TEST_GREP:-}` in a log line is a
   reference, not an assignment, and is allowed — the distinction is the point of the check).
-  `SOURCE_REPO_SLUG` is an ordinary one of these three points, with the CI end supplied as a
-  `workflow_dispatch` input — that is where a run triggered from another repo names the repo whose
-  PR it is testing, and an empty input reads as unset, which is the single-repo case.
+  `SOURCE_REPO_SLUG` and `WORK_REPO_SLUG` are ordinary ones of these three points, with the CI end
+  supplied as `workflow_dispatch` inputs — that is where the product CICD hands over the testing
+  context (which PR, in which repo) when it triggers a run after its deploy. An empty input reads as
+  unset, which is the single-repo case.
 - **A human's `TEST_GREP` is absolute, and the only thing the floor steps aside for.** It *is* the
   filter: stage 5 skips the planner agent entirely (asking a model for a scope you are about to
   discard costs a call and leaves a reason nothing acted on) and `planTier` returns it verbatim without

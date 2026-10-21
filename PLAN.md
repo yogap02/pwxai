@@ -152,7 +152,7 @@
 > the PR, at the last step of a run that had looked like it worked.
 >
 > **Addition (2026-10-21, fourth pass): pointed at a real PR, and the two things that stopped it.**
-> The first end-to-end PR run (against a real open PR, with `REPO_SLUG` pointed at that repository)
+> The first end-to-end PR run (against a real open PR, with `WORK_REPO_SLUG` pointed at that repository)
 > never reached past stage 1: `gh pr view --json` returned perfectly valid JSON and `JSON.parse`
 > choked on it anyway. `gh` was tracing its own HTTP requests onto **stderr**, and `ghJson` parsed
 > `stdout + stderr` merged — and the switch that turned the tracing on was this pipeline's own

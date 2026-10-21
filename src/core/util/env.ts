@@ -98,13 +98,17 @@ export interface Env {
    * `npm run self-checks` enforces that every assignment of it comes from an input.
    */
   TEST_GREP: string | undefined;
-  /** Repo slug (owner/name) for delivery: where the generated tests land. */
-  REPO_SLUG: string | undefined;
   /**
-   * Repo slug (owner/name) whose change is under test, when that is not the repo that
-   * delivers. The product repo dispatches this pipeline after its own deploy, so the PR
-   * stage 1 reads lives over there while the branch, push and PR live here. Absent =
-   * `REPO_SLUG`, the single-repo case.
+   * The WORK repo, `owner/name`: where the generated tests are committed, pushed and
+   * opened as a PR. We never deliver into the product repo, so this is the test repo —
+   * and the PR here is the review gate, never auto-merged.
+   */
+  WORK_REPO_SLUG: string | undefined;
+  /**
+   * The SOURCE repo, `owner/name`: whose change is under test. The product CICD triggers
+   * this pipeline after its own deploy and passes the testing context with it, so stage 1
+   * reads the PR over there while everything the pipeline writes stays in the work repo.
+   * Absent = `WORK_REPO_SLUG`.
    */
   SOURCE_REPO_SLUG: string | undefined;
   /** Source branch for the pipeline. */
@@ -138,7 +142,7 @@ export const env: Env = {
   GH_TOKEN: optionalEnv('GH_TOKEN'),
   CI: optionalEnv('CI'),
   TEST_GREP: optionalEnv('TEST_GREP'),
-  REPO_SLUG: optionalEnv('REPO_SLUG'),
+  WORK_REPO_SLUG: optionalEnv('WORK_REPO_SLUG'),
   SOURCE_REPO_SLUG: optionalEnv('SOURCE_REPO_SLUG'),
   SOURCE_BRANCH: optionalEnv('SOURCE_BRANCH'),
 };

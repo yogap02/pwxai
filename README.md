@@ -15,7 +15,7 @@ Mermaid diagrams — the workflow, and the three decisions worth knowing on thei
 
 ```bash
 npm ci
-cp .env.example .env            # fill in BASE_URL, MODEL_API_KEY, REPO_SLUG, ...
+cp .env.example .env            # fill in BASE_URL, MODEL_API_KEY, WORK_REPO_SLUG, ...
 npx playwright install chromium
 npm run self-checks             # cheap invariants, no browser
 npm test                        # playwright run against BASE_URL
@@ -47,30 +47,40 @@ npm run stage:8 -- --dry-run                 # mark git skipped instead of commi
 | `--grep <expr>` | override the planner's grep for stage 6 |
 | `--dry-run` | mark stages 6 and 8 skipped instead of running them |
 
-## Running it by hand, without a PR
+## Running it
 
-The workflow has a manual trigger, so a run needs neither an issue nor an open PR:
+A run answers a **deployment**, not a pull request: the product CICD triggers it after its own
+deploy and hands over the testing context — the PR whose change is under test, and the repo that PR
+lives in.
 
 ```bash
-gh workflow run test-pipeline -f from_scenarios=true          # digest what is already there
-gh workflow run test-pipeline -f pr=123                       # same as a PR-triggered run
-gh workflow run test-pipeline -f pr=123 -f test_grep=@smoke    # ...but overridden to smoke only
-gh run watch                                                  # follow the run you just started
+gh workflow run test-pipeline -f pr=123 -f source_repo=owner/product
+gh workflow run test-pipeline -f pr=123 -f source_repo=owner/product -f test_grep=@smoke
+gh workflow run test-pipeline -f from_scenarios=true           # digest what is already there, no PR
+gh run watch                                                   # follow the run you just started
 ```
 
 | Input | Meaning |
 |---|---|
-| `pr` | PR number for stage 1 to read. Leave empty when using `from_scenarios`. |
+| `pr` | The testing context: the PR whose change is under test, read from `source_repo`. |
+| `source_repo` | `owner/name` that PR lives in. Empty = this repo. |
 | `from_scenarios` | Skip stage 1 and digest the scenario files as they are — no PR needed. |
 | `dry_run` | Skip stage 6 (browser) and stage 8 (git push/PR). |
 | `test_grep` | The operator override above, typed per run. Empty = let the planner decide. |
 | `base_branch` | Branch for stage 8 to base the delivery branch on. Empty = `main`. |
 
-A manual run has no PR, so it must be told *something* — a PR number, or `from_scenarios`. Given
-neither, the run stops with an error rather than proceeding against an empty change set.
+A run must be told *something* — a PR number, or `from_scenarios`. Given neither, it stops with an
+error rather than proceeding against an empty change set.
 
-Two things a PR-triggered run gets for free and a manual one does not: the base branch (`SOURCE_BRANCH`
-falls back to `main`) and the PR to comment on.
+Without `source_repo` the run is about a PR in the **work** repo itself (where the tests are
+delivered). With it, the change under test lives elsewhere: stage 1 reads that PR and reports back to
+it, while the branch, commit, push and PR stay here.
+
+Locally the same context comes through the environment:
+
+```bash
+SOURCE_REPO_SLUG=owner/product WORK_REPO_SLUG=owner/tests npm run pipeline -- --pr 123
+```
 
 ## Reading the output
 

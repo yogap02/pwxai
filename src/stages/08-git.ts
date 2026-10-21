@@ -89,7 +89,7 @@ async function shipGate(): Promise<string | null> {
 function deliveryBaseBranch(ctx: StageContext): string {
   if (env.SOURCE_BRANCH !== undefined) return env.SOURCE_BRANCH;
   const foreign =
-    env.SOURCE_REPO_SLUG !== undefined && env.SOURCE_REPO_SLUG !== env.REPO_SLUG;
+    env.SOURCE_REPO_SLUG !== undefined && env.SOURCE_REPO_SLUG !== env.WORK_REPO_SLUG;
   if (foreign) return 'main';
   return ctx.manifest.branch ?? 'main';
 }
