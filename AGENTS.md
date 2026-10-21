@@ -23,12 +23,20 @@ npm run test:list               # enumerate specs without running
 npm run pipeline -- --pr 123    # full 8 stages against PR #123
 npm run stage:<n>               # re-run ONE stage against the last manifest (1-8)
 npm run stage -- <n|name>       # e.g. `-- 3 --domain landing-page`; `stage` alone prints usage
+gh workflow run test-pipeline -f from_scenarios=true   # start a run by hand, no PR needed
 ```
 
 - `npm run stage:<n>` is the debug handle: it reuses `artifacts/run/manifest.json` instead of
   paying for all 8 stages. Stages 1/2 start a manifest; 3–8 consume it and refuse to guess when
   it is missing. `--dry-run` marks stages 6/8 skipped.
 
+- The workflow also has a **manual trigger** (`workflow_dispatch`): inputs `pr`, `from_scenarios`,
+  `dry_run`, `test_grep`, `base_branch`. A manual run has no PR context, so `--pr` is optional and
+  the run step errors rather than proceeding against an empty change set if neither `pr` nor
+  `from_scenarios` is given; `SOURCE_BRANCH` falls back to `main`.
+- The workflow declares `permissions: contents: write, pull-requests: write` on purpose. A new
+  repository defaults `GITHUB_TOKEN` to read-only, so without it stage 8 fails to push its branch or
+  open the PR — at the *last* step, of a run that had otherwise looked successful.
 - CI runs `npm run typecheck && npm run self-checks` immediately before `npm run pipeline`.
 - Add new invariant checks to `src/cli/self-checks.ts` using its `check()` helper — it is not a
   test framework, just assertions. Rule: add one when the failure would be *silent* (green report).
@@ -168,8 +176,10 @@ npm run stage -- <n|name>       # e.g. `-- 3 --domain landing-page`; `stage` alo
   *configuration*, read through `core/util/env.ts`. Two variables are deliberately not among these:
   `HEAL_RUN_ID` is per-run plumbing that stage 6 passes into the Playwright child process, so it
   cannot be missing where the tests run; `TEST_GREP` is an **operator override** — a standing value in
-  the CI definition would pin every run to one person's filter, silently, and `npm run self-checks`
-  fails if it appears there.
+  the CI definition would pin every run to one person's filter, silently. It is therefore a
+  `workflow_dispatch` **input**, not a job-level `env`, and `npm run self-checks` fails unless each
+  assignment of it is sourced from `${{ inputs.* }}` (a bare `${TEST_GREP:-}` in a log line is a
+  reference, not an assignment, and is allowed — the distinction is the point of the check).
 - **A human's `TEST_GREP` is absolute, and the only thing the floor steps aside for.** It *is* the
   filter: stage 5 skips the planner agent entirely (asking a model for a scope you are about to
   discard costs a call and leaves a reason nothing acted on) and `planTier` returns it verbatim without

@@ -197,8 +197,17 @@ TEST_GREP=@smoke npm run pipeline -- --pr 123
 
 Absolute in effect, never silent: the report says the run was *overridden* rather than
 planned, names what the filter left out, and shouts when it excludes a test this run
-wrote. `TEST_GREP` is deliberately not in the CI definition — an override belongs to the
-command someone typed, not to a standing value that would pin every run.
+wrote. `TEST_GREP` is never a standing value in the CI definition — that would pin every
+run, silently — but it is a `workflow_dispatch` input, because a field a person fills in
+per run is the same instruction as a command they typed:
+
+```bash
+gh workflow run test-pipeline -f pr=123 -f test_grep=@smoke
+```
+
+A manual run has no PR context, so stage 1 needs either `-f pr=<number>` or
+`-f from_scenarios=true`; given neither, the run stops rather than proceeding against an
+empty change set.
 
 ---
 

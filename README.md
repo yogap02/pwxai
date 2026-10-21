@@ -47,6 +47,31 @@ npm run stage:8 -- --dry-run                 # mark git skipped instead of commi
 | `--grep <expr>` | override the planner's grep for stage 6 |
 | `--dry-run` | mark stages 6 and 8 skipped instead of running them |
 
+## Running it by hand, without a PR
+
+The workflow has a manual trigger, so a run needs neither an issue nor an open PR:
+
+```bash
+gh workflow run test-pipeline -f from_scenarios=true          # digest what is already there
+gh workflow run test-pipeline -f pr=123                       # same as a PR-triggered run
+gh workflow run test-pipeline -f pr=123 -f test_grep=@smoke    # ...but overridden to smoke only
+gh run watch                                                  # follow the run you just started
+```
+
+| Input | Meaning |
+|---|---|
+| `pr` | PR number for stage 1 to read. Leave empty when using `from_scenarios`. |
+| `from_scenarios` | Skip stage 1 and digest the scenario files as they are — no PR needed. |
+| `dry_run` | Skip stage 6 (browser) and stage 8 (git push/PR). |
+| `test_grep` | The operator override above, typed per run. Empty = let the planner decide. |
+| `base_branch` | Branch for stage 8 to base the delivery branch on. Empty = `main`. |
+
+A manual run has no PR, so it must be told *something* — a PR number, or `from_scenarios`. Given
+neither, the run stops with an error rather than proceeding against an empty change set.
+
+Two things a PR-triggered run gets for free and a manual one does not: the base branch (`SOURCE_BRANCH`
+falls back to `main`) and the PR to comment on.
+
 ## Reading the output
 
 Three artifacts come out of a run, and they answer different questions:
@@ -174,8 +199,10 @@ same as silent, though: the summary reports the override (rather than reading li
 planned scope), names what it left out, and **shouts** when the override excludes a test
 *this run wrote*.
 
-`TEST_GREP` is deliberately not registered in the CI definition — an override belongs to
-the command someone typed, not to a standing value that would pin every run.
+`TEST_GREP` is never a **standing value** in the CI definition — that would pin every run to one
+person's filter, silently, and `npm run self-checks` fails unless every assignment of it is sourced
+from a run-time input. On the manual trigger it *is* such an input, because a form a person fills in
+per run is the same instruction as a command they typed, just delivered differently.
 
 That is what makes a scope a tag filter rather than a title filter:
 

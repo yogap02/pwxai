@@ -139,8 +139,17 @@
 > report read six months later would otherwise be misattributed to the agent; and the
 > summary shouts when the override excludes a test **this run wrote** — the one outcome
 > the floor exists to prevent, now reachable by an operator and therefore announced. It
-> is deliberately not registered in the CI definition (a standing value there would pin
-> every run, silently), and a self-check fails if it ever appears there.
+> is never a standing value in the CI definition (that would pin every run, silently) but
+> is a `workflow_dispatch` input, and a self-check enforces that any assignment of it comes
+> from `${{ inputs.* }}`.
+>
+> **Addition (2026-10-21, third pass): the workflow is startable by hand.** `workflow_dispatch`
+> takes `pr` / `from_scenarios` / `dry_run` / `test_grep` / `base_branch`. A manual run has no PR
+> context, so three things follow: `--pr` becomes optional and the run step errors rather than
+> proceeding against an empty change set; `SOURCE_BRANCH` falls back to `main` (stage 8 already
+> treats it as optional); and `permissions:` is now declared explicitly, because a new repository
+> defaults `GITHUB_TOKEN` to read-only — stage 8 would otherwise fail to push its branch or open
+> the PR, at the last step of a run that had looked like it worked.
 
 ## Context
 

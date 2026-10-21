@@ -1994,18 +1994,42 @@ check('DEBUG is a parsed toggle, and a malformed value throws', () => {
   assert(threw, 'a malformed DEBUG must throw, not silently read as off');
 });
 
-check('TEST_GREP is an operator override, never a CI default', async () => {
-  // Registered in .env.example, where a human sets it, and deliberately NOT in the CI
-  // definition: a standing value there would pin EVERY run to one person's filter and
-  // the pipeline would quietly stop planning. The same class of exception as
-  // HEAL_RUN_ID — per-run plumbing — except this one is an instruction.
+check('TEST_GREP is an operator override, never a standing CI default', async () => {
+  // An override belongs to a person, for one run. It may therefore appear as a
+  // workflow_dispatch input — that is someone typing it when they press Run — but never
+  // sourced from a repository variable or a literal, which would pin EVERY run to one
+  // filter and the pipeline would quietly stop planning. The same class of exception as
+  // HEAL_RUN_ID: per-run, not configuration.
   const example = await readFile(rehydrate('.env.example'), 'utf8');
   const workflow = await readFile(rehydrate('.github/workflows/pipeline.yml'), 'utf8');
   assert(example.includes('TEST_GREP'), '.env.example must document the override');
-  assert(
-    !workflow.includes('TEST_GREP'),
-    'TEST_GREP must NOT be in the CI definition — an override there pins every run, silently',
-  );
+  // What is forbidden is a STANDING SOURCE, and only an assignment has one. Two shapes
+  // assign it, and only these:
+  //     TEST_GREP: <value>        YAML block style — how step env is set here
+  //     TEST_GREP=<value> cmd     shell prefix assignment
+  // A bare `${TEST_GREP:-}` or `$TEST_GREP` in a log line assigns nothing and is allowed,
+  // so matching every mention would fail the workflow's own progress echo.
+  const standingValue = (line: string): string | null => {
+    const yaml = /^\s*TEST_GREP\s*:\s*(.*)$/.exec(line);
+    if (yaml) return yaml[1] ?? '';
+    const shell = /(?:^|[\s;(])TEST_GREP=(\S.*)$/.exec(line);
+    if (shell) {
+      const value = shell[1] ?? '';
+      if (/^\$\{?TEST_GREP\b/.test(value)) return null; // `TEST_GREP=$TEST_GREP` is a self-reference, not a source
+      return value;
+    }
+    return null;
+  };
+  for (const line of workflow.split('\n')) {
+    const value = standingValue(line);
+    if (value === null) continue;
+    assert(
+      /\$\{\{\s*inputs\./.test(value),
+      `TEST_GREP may only be assigned from a run-time dispatch input, never a vars./secret/literal value: ${line.trim()}`,
+    );
+  }
+  // And the manual door has to exist, or a human has no way in without a PR.
+  assert(/workflow_dispatch:/.test(workflow), 'the workflow must be startable by hand');
 });
 
 check('debug is registered where a run can read it, and is actually emitted', async () => {

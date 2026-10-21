@@ -7,6 +7,42 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 
+  # Manual run. A PR-triggered run has its issue + diff handed to it; a manual run
+  # has no PR context, so `--pr` becomes optional and `from_scenarios` replaces it.
+  # Inputs are typed by a person at run time — which is why `test_grep` may live
+  # here but never in the `env:` block below (see its description).
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: 'PR number for stage 1 to read (its issue + diff). Leave empty if using from_scenarios.'
+        required: false
+        type: string
+      from_scenarios:
+        description: 'Skip stage 1. Digest the scenario files as they are — no PR needed.'
+        required: false
+        default: false
+        type: boolean
+      dry_run:
+        description: 'Stop before the world changes: skips stage 6 (browser) and stage 8 (git push/PR).'
+        required: false
+        default: false
+        type: boolean
+      test_grep:
+        description: 'Operator override: run only tests matching this grep (e.g. @smoke). Skips the planner agent and the floor. Empty = let the planner decide.'
+        required: false
+        type: string
+      base_branch:
+        description: 'Branch for stage 8 to base the delivery branch on. Empty = main.'
+        required: false
+        type: string
+
+# Stage 8 creates a branch, pushes it and opens a PR, and stage 1 comments on the
+# source PR. New repositories default GITHUB_TOKEN to read-only, so without this the
+# delivery stages fail at the last step of a run that otherwise succeeded.
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   self-checks-and-pipeline:
     runs-on: ubuntu-latest
@@ -27,7 +63,9 @@ jobs:
       MODEL_REASONING_EFFORT: ${{ vars.MODEL_REASONING_EFFORT }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       REPO_SLUG: ${{ github.repository }}
-      SOURCE_BRANCH: ${{ github.event.pull_request.base.ref }}
+      # A PR run knows its base branch; a manual run does not. Empty is correct here
+      # rather than harmful: stage 8 falls back to `main` when SOURCE_BRANCH is unset.
+      SOURCE_BRANCH: ${{ github.event.pull_request.base.ref || inputs.base_branch }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -51,5 +89,26 @@ jobs:
         env:
           # Tests run inside the container — a value set only in this step's
           # shell never reaches them. Register at the job env level (above).
-          TCGEN_PR: ${{ github.event.pull_request.number }}
-        run: npm run pipeline -- --pr "$TCGEN_PR"
+          TCGEN_PR: ${{ github.event.pull_request.number || inputs.pr }}
+          TCGEN_FROM_SCENARIOS: ${{ inputs.from_scenarios }}
+          TCGEN_DRY_RUN: ${{ inputs.dry_run }}
+          # The operator's override, and ONLY theirs: sourced from a run-time input,
+          # never from a repository variable. A standing value would pin every run to
+          # one person's filter and the pipeline would quietly stop planning. An empty
+          # input reads as unset (core/util/env.ts), so no override is applied.
+          TEST_GREP: ${{ inputs.test_grep }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ -n "$TCGEN_PR" ]; then
+            args+=(--pr "$TCGEN_PR")
+          elif [ "$TCGEN_FROM_SCENARIOS" = "true" ]; then
+            args+=(--from-scenarios)
+          else
+            echo "::error::Nothing to run. Supply a PR number, or tick 'from_scenarios' for a manual run with no PR."
+            exit 1
+          fi
+          if [ "$TCGEN_DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+          [ -n "${TEST_GREP:-}" ] && echo "override active: TEST_GREP=$TEST_GREP (the planner agent will be skipped)"
+          echo "pipeline args: ${args[*]}"
+          npm run pipeline -- "${args[@]}"

@@ -271,6 +271,12 @@ planned scope, and when it excludes a test that this run wrote — the exact out
 prevent — the report says so in bold. Fail open is a rule about **degraded input**; a deliberate
 instruction is not degraded input.
 
+The operator's channel matters as much as the instruction: it is a run-time input, never a repository
+variable. A standing `TEST_GREP` would make the override permanent and silent — every run pinned to one
+person's filter, nobody having asked for it that day — which is the same failure as a default that hides
+a missing value. Cheap checks gate expensive spend (§3), so this one is enforced by a self-check rather
+than by memory.
+
 When a run *is* narrowed, the reduction is chosen, named in the report, and printed on the PR and
 the notification. And the floor is **enforced in code and re-verified**: the narrow filter always
 includes everything generated in that run, and the planner re-checks that the filter still selects
