@@ -34,18 +34,24 @@ Choose exactly ONE scope for this run and give a one-line reason a reviewer can
 audit. Pick the NARROWEST scope that is still safe:
 
 - `smoke` when the change is small, self-contained, and touches nothing broad.
+- `smoke` also when the change touches NO product behaviour at all — CI configuration,
+  deploy scripts, documentation, tooling — and wrote no scenario. That is a DEPLOYMENT
+  check: what needs confirming is that the app came up and its main journeys work. Running
+  the whole suite cannot find a behaviour change that does not exist, and it reports reds
+  that belong to the product rather than to this change.
 - `sanity` when the change touches shared behaviour, and the always-run key tests
   are enough to cover it.
 - `regression` when you are NOT confident — a wide change, an unclear diff, a
-  large number of blocked scenarios, or risk areas that do not map cleanly onto
-  tagged tests. Widening is always available; it costs only time.
+  large number of blocked scenarios, or PRODUCT risk areas that do not map cleanly
+  onto tagged tests. Widening is always available; it costs only time.
 
 Rules:
 - You are choosing a NAME, not a filter. Do not emit a grep, tags, or test titles.
 - Tests written for this change ALWAYS run, whatever you choose. Never pick a
   narrower scope in order to exclude them, and never discount them.
-- Prefer `regression` when in doubt. A scope that misses a broken feature is far
-  worse than a slower run.
+- Prefer `regression` when in doubt — a scope that misses a broken feature is far
+  worse than a slower run. A change that touches no product behaviour is not in
+  doubt, though: there is no product behaviour to regress.
 
 # Output
 
