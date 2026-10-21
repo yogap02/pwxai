@@ -17,7 +17,7 @@ npm ci
 cp .env.example .env            # Windows: copy .env.example .env — then fill it in
 npx playwright install chromium # needed for local npm test / stage-3 builder
 npm run typecheck               # tsc --noEmit, strict — the only static gate
-npm run self-checks             # plain-assertion invariants (71 today), no browser, seconds
+npm run self-checks             # plain-assertion invariants (85 today), no browser, seconds
 npm test                        # playwright; needs a live BASE_URL
 npm run test:list               # enumerate specs without running
 npm run pipeline -- --pr 123    # full 9 stages against PR #123
