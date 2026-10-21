@@ -67,7 +67,21 @@ jobs:
       # Reasoning models spend the pipeline's small token budgets on thinking and
       # return null content unless this is set to none/minimal.
       MODEL_REASONING_EFFORT: ${{ vars.MODEL_REASONING_EFFORT }}
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # What every `gh` call authenticates with: stage 1 reading the SOURCE PR and commenting
+      # back, and stage 8 opening the PR here. A PAT, not the Actions-issued token, because that
+      # one is scoped to THIS repo and cannot see a private product repo — so
+      # `gh pr view --repo <product>` 404s the moment the source repo is not this one, which is
+      # the entire product-dispatch case.
+      #
+      # The GITHUB_TOKEN fallback is deliberate and is not a convenience: an absent GH_PAT is the
+      # same statement as an absent SOURCE_REPO_SLUG — there is no other repo to reach — and a
+      # single-repo run must keep working on the boilerplate's default secret with no PAT at all.
+      # A GH_PAT that is set but expired or under-scoped does NOT fall back (a non-empty secret
+      # wins), so a stale token still fails loudly rather than silently at stage 1.
+      #
+      # Checkout and `git push` are unaffected: `permissions:` above governs those, on the
+      # Actions token, whatever this is set to.
+      GH_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
       # The WORK repo: `github.repository` is the repo this workflow runs in, so it is the
       # one the tests are committed, pushed and PR'd to — never the product repo.
       WORK_REPO_SLUG: ${{ github.repository }}
