@@ -20,6 +20,7 @@ import { dirname } from 'node:path';
 import { rehydrate, toRepoRelative, isRepoRelativePosix, assertRepoRelativePosix, joinRepo } from '../core/util/paths.js';
 import { parseBlock, parseScenarioFile, hash } from '../core/scenario/parser.js';
 import { renderManagedRegion, readManagedRegion, upsertManagedRegion, scaffoldManagedSpec, mergeManagedRegion, stripBlockImports, blockViolations, MANAGED_START, MANAGED_END, type ManagedBlock } from '../core/scenario/managed-region.js';
+import { blockCompileErrors, blockSpans, parseTscErrors } from '../core/scenario/compile-guard.js';
 import { repairTruncatedJson, extractJson } from '../ai/model-client.js';
 import { substitute } from '../ai/prompts/load.js';
 import { planTier } from '../planning/planner.js';
@@ -34,7 +35,7 @@ import { repairable } from '../stages/07-heal-apply.js';
 import { HealManifest, healNote, refusalNote, healReportLines, type HealRecord } from '../runtime/heal-manifest.js';
 import { closestCopy, fallbackCandidates, localeOf, similarity } from '../runtime/heal-locator.js';
 import { freshObservationLines, OBSERVATION_HEADING } from '../agent/cdp-builder-stub.js';
-import { StageRunner, type StageSpec } from '../core/orchestration/stage-runner.js';
+import { StageRunner, runStageProcess, type StageSpec } from '../core/orchestration/stage-runner.js';
 import { loadDomainMap, instructionFileFor } from '../core/scenario/domain-map.js';
 import { mapOrdered } from '../core/util/pool.js';
 import { createPool } from '../core/util/pool.js';
@@ -952,6 +953,83 @@ check('generated output is gated before it ships, not only before it is generate
   const gated = src.indexOf('await shipGate()');
   const shipped = src.indexOf('await codeHost.createBranch(');
   assert(gated >= 0 && shipped >= 0 && gated < shipped, 'the gate must refuse BEFORE a branch is created');
+});
+
+check('a compiler error is attributed to the block that owns the line', async () => {
+  // The compiler is the only gate that can see a block calling the page object WRONG rather than
+  // naming something absent — sufficiency is not checkable from a list of member names. Its value
+  // is the ATTRIBUTION, not the error: TypeScript reports against the FILE, every block of a
+  // domain lives in one file, and so a single bad block used to cost every other block its
+  // delivery (seventeen correct blocks refused along with four wrong ones, on a real PR). The span
+  // arithmetic is the part that can be silently wrong — refuse the neighbour, or keep the offender
+  // — so it is driven here with synthetic text instead of the compiler it wraps.
+  const file = [
+    "import { test } from '../../src/runtime/self-heal-fixture.js';",
+    '',
+    'test.describe("demo", () => {',
+    '  // @digest:managed:start',
+    '',
+    '  // @digest:block:aaaaaaaaaaaaaaaa:1111111111111111',
+    "  test('one', async () => {",
+    '    const a = 1;',
+    '  });',
+    '  // @digest:end-block',
+    '',
+    '  // @digest:block:bbbbbbbbbbbbbbbb:2222222222222222',
+    "  test('two', async () => {",
+    "    await demoPage.goto('/x');",
+    '  });',
+    '  // @digest:end-block',
+    '',
+    '  // @digest:managed:end',
+    '});',
+  ].join('\n');
+
+  assert(
+    JSON.stringify(blockSpans(file)) ===
+      JSON.stringify([
+        { scenarioId: 'aaaaaaaaaaaaaaaa', from: 6, to: 10 },
+        { scenarioId: 'bbbbbbbbbbbbbbbb', from: 12, to: 16 },
+      ]),
+    'a span must run from the block marker through its end-marker, inclusive',
+  );
+
+  const tsc = [
+    '> tcgen@0.1.0 typecheck',
+    '> tsc --noEmit',
+    'tests/demo/demo.spec.ts(14,5): error TS2554: Expected 0 arguments, but got 1.',
+    '  Type undefined is not assignable.', // the continuation line tsc prints: not a diagnostic
+    'tests/demo/demo.spec.ts(16,4): error TS2554: Expected 0 arguments, but got 1.',
+    'tests/demo/demo.spec.ts(11,1): error TS1005: a blank line between blocks owns no block',
+    'tests/demo/demo.spec.ts(1,1): error TS6133: the import belongs to nobody',
+    'tests/other/other.spec.ts(3,3): error TS1005: another file is not this domain to refuse',
+  ].join('\n');
+
+  const verdict = blockCompileErrors(file, 'tests/demo/demo.spec.ts', tsc);
+  assert(
+    [...verdict.byBlock.keys()].join(',') === 'bbbbbbbbbbbbbbbb',
+    `only the offending block is blamed, got: ${[...verdict.byBlock.keys()].join(',')}`,
+  );
+  assert(
+    (verdict.byBlock.get('bbbbbbbbbbbbbbbb') ?? []).length === 2,
+    'the end-marker line belongs to the block ending there, and the banner is not a diagnostic',
+  );
+  assert(
+    verdict.unattributed.length === 2,
+    `lines no block owns are named rather than dropped — got ${verdict.unattributed.length}`,
+  );
+  assert(
+    parseTscErrors('tests\\other\\other.spec.ts(3,3): error TS1005: x')[0]?.file === 'tests/other/other.spec.ts',
+    'a Windows path is normalised, or the guard finds nothing on the platform this is developed on',
+  );
+
+  // And stage 2 must apply it, or the attribution never fires.
+  const digest = stripComments(await readFile(rehydrate('src/stages/02-testcase-digest.ts'), 'utf8'));
+  assert(/blockCompileErrors\(composed\.text/.test(digest), 'stage 2 must attribute compile errors to blocks');
+  assert(
+    /verdict\.byBlock\.size > 0/.test(digest) && /composeSpec\(\)/.test(digest),
+    'a blamed block must trigger a recomposition, not just a report',
+  );
 });
 
 check('every expect() in a page object passes an assertion message', async () => {
@@ -2093,6 +2171,37 @@ check('a child is not handed our DEBUG, which it may read as its own switch', as
   const fn = src.slice(start, next === -1 ? undefined : next);
   assert(/DEBUG:\s*''/.test(fn), "ghEnv() must clear DEBUG — gh reads it as GH_DEBUG and traces HTTP");
   assert(/GH_DEBUG:\s*''/.test(fn), 'ghEnv() must clear GH_DEBUG too, which is the same switch');
+});
+
+check('a runtime-built delivery argument is never handed to a shell', async () => {
+  // The commit message and the PR body are built at run time, spaces and newlines included, and a
+  // shell re-parses those into separate argv entries. Stage 8's commit died with four unknown
+  // pathspecs — "generated", "+", "healed", "locators" — on a run that had otherwise succeeded,
+  // and `--title`/`--body` would have gone the same way one step later. `git` and `gh` are real
+  // executables, so no shell is needed to find either.
+  const host = stripComments(await readFile(rehydrate('src/delivery/github.ts'), 'utf8'));
+  assert(/const NO_SHELL = \{ shell: false \}/.test(host), 'NO_SHELL must actually be no-shell');
+  const calls = host.split('runStageProcess(').slice(1);
+  assert(calls.length >= 3, `git and gh must go through runStageProcess — found ${calls.length} call(s)`);
+  for (const call of calls) {
+    const opts = call.slice(0, 400);
+    assert(
+      opts.includes('NO_SHELL') || opts.includes('shell: false'),
+      'every git/gh invocation must disable the shell, or a runtime-built argument is re-split',
+    );
+  }
+
+  // And a spawn FAILURE must come back as a failed process rather than an unhandled `error` event:
+  // before this, a machine with no `gh` on PATH took the whole run down instead of failing the one
+  // stage that asked for it — which is also what makes `shell: false` safe to demand above.
+  const missing = await runStageProcess('tcgen-no-such-executable-xyz', ['--version'], {
+    timeoutMs: 20_000,
+    shell: false,
+  });
+  assert(
+    !missing.ok && /failed to run/.test(missing.output),
+    `a spawn failure must resolve as a failed process: ok=${missing.ok} ${missing.output.slice(0, 120)}`,
+  );
 });
 
 check('a parsed result comes from stdout, never the merged stream', async () => {

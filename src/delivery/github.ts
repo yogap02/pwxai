@@ -14,6 +14,16 @@ import type {
 
 const GH_TIMEOUT = 60_000;
 
+/**
+ * `git` and `gh` are handed arguments this code BUILT at run time — a commit message with spaces,
+ * a PR title, a PR body with newlines — and a shell re-parses those into separate argv entries.
+ * `runStageProcess` defaults to `shell: true` on Windows so that PATH finds `.cmd` shims, which
+ * turned `-m "test(pipeline): generated tests + healed locators"` into four unknown pathspecs and
+ * failed the commit outright; `--body` and `--title` would have gone the same way a step later.
+ * Both are real executables here, so nothing needs a shell to find them.
+ */
+const NO_SHELL = { shell: false } as const;
+
 export class GitHubCodeHost implements CodeHost {
   async fetchSource(prNumber: number): Promise<SourceIssue> {
     const repo = requireRepoSlug();
@@ -60,7 +70,7 @@ export class GitHubCodeHost implements CodeHost {
         '--base', input.baseBranch,
         '--json', 'url,number',
       ],
-      { timeoutMs: GH_TIMEOUT, env: ghEnv() },
+      { timeoutMs: GH_TIMEOUT, env: ghEnv(), ...NO_SHELL },
     );
     if (res.ok) {
       try {
@@ -82,7 +92,7 @@ export class GitHubCodeHost implements CodeHost {
   }
 
   private async gh(args: readonly string[]): Promise<string> {
-    const res = await runStageProcess('gh', args, { timeoutMs: GH_TIMEOUT, env: ghEnv() });
+    const res = await runStageProcess('gh', args, { timeoutMs: GH_TIMEOUT, env: ghEnv(), ...NO_SHELL });
     if (!res.ok) throw new Error(`gh ${args.join(' ')} failed: ${res.output.slice(0, 500)}`);
     // Data, not diagnostics. `output` merges stderr, and gh writes warnings — and, when
     // its debug switch is on, an HTTP trace — there. Merged, that trace lands inside the
@@ -100,7 +110,7 @@ export class GitHubCodeHost implements CodeHost {
   }
 
   private async git(args: readonly string[]): Promise<void> {
-    const res = await runStageProcess('git', args, { timeoutMs: GH_TIMEOUT });
+    const res = await runStageProcess('git', args, { timeoutMs: GH_TIMEOUT, ...NO_SHELL });
     if (!res.ok) throw new Error(`git ${args.join(' ')} failed: ${res.output.slice(0, 500)}`);
   }
 }

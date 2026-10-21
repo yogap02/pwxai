@@ -59,7 +59,15 @@ gh workflow run test-pipeline -f from_scenarios=true   # start a run by hand, no
 - `runStageProcess` spawns through a shell on Windows (so PATH finds `.cmd` shims like `npx`). A
   shell re-parses the arguments, so any runtime-built argument containing `|` becomes a pipe:
   a Playwright grep like `@core|@smoke|Some title` kills the run with exit 255. Pass
-  `shell: false` and spawn `process.execPath` with an args array instead.
+  `shell: false` and spawn `process.execPath` with an args array instead. It does not need a
+  metacharacter to bite: a shell splits on **spaces**, so stage 8's commit message —
+  `test(pipeline): generated tests + healed locators` — arrived as four unknown pathspecs and the
+  commit failed, on a run whose gates had just passed, and the PR `--title`/`--body` would have gone
+  the same way one step later. `git` and `gh` are executables, so `src/delivery/github.ts` hands them
+  `shell: false` (`NO_SHELL`). Dropping the shell means a missing executable surfaces as a spawn
+  `error` rather than a non-zero exit, so `runStageProcess` resolves that as a failed process — as an
+  unhandled `error` event it took the whole pipeline down instead of failing the stage that asked for
+  it.
 - Stage 6 must not pass `--reporter`: `playwright.config.ts` already configures `list` + `json`
   with the `outputFile` that this stage reads. Overriding the reporter sends the JSON to stdout and
   the stage then finds no report. It also deletes the stale report before running — reading the

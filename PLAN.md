@@ -180,13 +180,25 @@
 > failing the stage rather than shipping. Refused, never stripped: deleting the offending lines would
 > leave a test that passes and asserts nothing.
 >
-> Two things left open on purpose, to be decided as design rather than patched. One broken block still
-> sinks a whole spec file, so a per-block compile check (attribute a `tsc` diagnostic to the block
-> that owns the line, refuse that block, keep the rest) would let the pipeline deliver the blocks the
-> page object *can* express instead of refusing the domain; on this PR nearly every short-link
-> scenario is HTTP-level, which the landing-page POM cannot express, so the honest output is a pile of
-> work orders. And the report half is untouched: the retry overwriting the digest's verdicts still
-> makes "nothing was generated" reachable for a run that generated.
+> One broken block still sank a whole spec file, so the compiler is now consulted per block: stage 2
+> runs `npm run typecheck` over the file it just wrote, attributes each diagnostic to the managed
+> block that owns the line (`src/core/scenario/compile-guard.ts`), refuses that block and recomposes
+> with a work order in its place. On this PR that is the difference between delivering nothing and
+> delivering 19 tests plus 6 work orders — among them a block the compiler rejected with
+> `TS2554: Expected 0 arguments, but got 1.` for calling `goto(path)` on a zero-argument method,
+> which no list of member names could have caught.
+>
+> Verifying that end to end then found that stage 8 had **never delivered anything at all**: its
+> commit message went through a shell, which split `test(pipeline): generated tests + healed
+> locators` into argv entries, so git refused four unknown pathspecs and the commit failed — on a run
+> whose gates had just passed. The code host now hands `git` and `gh` `shell: false` (both are
+> executables; only `.cmd` shims need the shell), and `runStageProcess` resolves a spawn failure
+> instead of letting an unhandled `error` event kill the run. The PR body would have been re-split a
+> step later, and the same class hid two earlier bugs: a code path CI's `--from-scenarios` runs never
+> reached.
+>
+> Still untouched, and the one thing left: the run's own report. The retry overwriting the digest's
+> verdicts still makes "nothing was generated" reachable for a run that generated.
 
 ## Context
 

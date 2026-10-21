@@ -223,6 +223,25 @@ export async function runStageProcess(
     process.once('SIGINT', () => onSignal('SIGINT'));
     process.once('SIGTERM', () => onSignal('SIGTERM'));
 
+    // A spawn FAILURE — no such executable, a bad cwd — emits `error`, not `close`. Unhandled,
+    // that took the whole pipeline down as an unhandled event: a machine without `gh` on PATH
+    // crashed the run instead of failing the one stage that asked for it. Resolved, not thrown,
+    // because a stage records its own failure and the run continues (stage 8 is non-fatal on
+    // purpose). It also makes `shell: false` safe for a caller that needs a real executable:
+    // without this, dropping the shell would trade a mangled argument for a crash.
+    child.on('error', (err: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(killTimer);
+      resolveP({
+        ok: false,
+        stdout: '',
+        output: redact(`failed to run \`${command}\`: ${err.message}`).trim(),
+        exitCode: null,
+        timedOut,
+      });
+    });
+
     child.on('close', (code) => {
       settled = true;
       clearTimeout(killTimer);
