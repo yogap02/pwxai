@@ -150,6 +150,43 @@
 > treats it as optional); and `permissions:` is now declared explicitly, because a new repository
 > defaults `GITHUB_TOKEN` to read-only — stage 8 would otherwise fail to push its branch or open
 > the PR, at the last step of a run that had looked like it worked.
+>
+> **Addition (2026-10-21, fourth pass): pointed at a real PR, and the two things that stopped it.**
+> The first end-to-end PR run (against a real open PR, with `REPO_SLUG` pointed at that repository)
+> never reached past stage 1: `gh pr view --json` returned perfectly valid JSON and `JSON.parse`
+> choked on it anyway. `gh` was tracing its own HTTP requests onto **stderr**, and `ghJson` parsed
+> `stdout + stderr` merged — and the switch that turned the tracing on was this pipeline's own
+> `DEBUG`, which `gh` honours as its debug flag (an alias for `GH_DEBUG`) and which
+> `runStageProcess` hands to every child. So `DEBUG=true`, shipped in `.env` and in the CI
+> definition, killed every PR-triggered run at its first model-free step, while three green CI runs
+> had hidden it completely: those used `--from-scenarios`, which skips stage 1. The same leak put
+> 297 characters of `* Request took 537ms` inside the diff handed to the model.
+> `runStageProcess` now returns `stdout` and the merged `output` as separate things (a caller that
+> PARSES a result reads `stdout`), `ghEnv()` clears `DEBUG`/`GH_DEBUG`, and stage 8's "anything to
+> ship?" reads `stdout` too — a git line-ending warning on stderr would otherwise look like a change
+> and push an empty branch.
+>
+> Then stage 1 worked, and the run reported a **success** on output that was not shippable. Eleven
+> blocks were generated for the PR's short-link feature; several called `page.request.get` and
+> `expect()` directly, so the spec did not compile — nine TypeScript errors, taking twelve
+> handwritten tests in that file down with it — and `npm run self-checks` went from 71 passing to 2
+> failing. Seven more blocks asserted nothing at all, which the report-only backstop flagged exactly.
+> The summary nonetheless read "23 kept · Nothing was generated this run · Needs attention: Nothing",
+> because the digest-retry re-digests and overwrote the verdicts the first pass had recorded: a run
+> that wrote eleven blocks reported writing none. Two guards make the failure loud instead of green:
+> stage 2 **refuses** a block that reaches past the page object (`blockViolations`) and turns its
+> scenario into an `unbuildable` work order rather than writing a test that cannot compile; and stage
+> 8 runs `typecheck && self-checks` over the **output** — CI runs them only *before* the pipeline —
+> failing the stage rather than shipping. Refused, never stripped: deleting the offending lines would
+> leave a test that passes and asserts nothing.
+>
+> Two things left open on purpose, to be decided as design rather than patched. One broken block still
+> sinks a whole spec file, so a per-block compile check (attribute a `tsc` diagnostic to the block
+> that owns the line, refuse that block, keep the rest) would let the pipeline deliver the blocks the
+> page object *can* express instead of refusing the domain; on this PR nearly every short-link
+> scenario is HTTP-level, which the landing-page POM cannot express, so the honest output is a pile of
+> work orders. And the report half is untouched: the retry overwriting the digest's verdicts still
+> makes "nothing was generated" reachable for a run that generated.
 
 ## Context
 

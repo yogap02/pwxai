@@ -64,14 +64,14 @@ export class GitHubCodeHost implements CodeHost {
     );
     if (res.ok) {
       try {
-        const j = JSON.parse(res.output) as { url: string; number: number };
+        const j = JSON.parse(res.stdout) as { url: string; number: number };
         return { number: j.number, url: j.url };
       } catch {
         // fall through to stdout parsing
       }
     }
     // Parse the URL from whatever gh printed (plain success or error text).
-    const url = /https:\/\/\S+\/pull\/\d+/.exec(res.output)?.[0];
+    const url = /https:\/\/\S+\/pull\/\d+/.exec(res.stdout)?.[0];
     if (!url) throw new Error(`gh pr create: could not parse PR URL from output: ${res.output.slice(0, 500)}`);
     return { number: Number(url.split('/').pop()), url };
   }
@@ -84,7 +84,10 @@ export class GitHubCodeHost implements CodeHost {
   private async gh(args: readonly string[]): Promise<string> {
     const res = await runStageProcess('gh', args, { timeoutMs: GH_TIMEOUT, env: ghEnv() });
     if (!res.ok) throw new Error(`gh ${args.join(' ')} failed: ${res.output.slice(0, 500)}`);
-    return res.output;
+    // Data, not diagnostics. `output` merges stderr, and gh writes warnings — and, when
+    // its debug switch is on, an HTTP trace — there. Merged, that trace lands inside the
+    // diff this returns and inside the JSON `ghJson` parses.
+    return res.stdout;
   }
 
   private async ghJson(args: readonly string[]): Promise<{ json: unknown; text: string }> {
@@ -102,8 +105,17 @@ export class GitHubCodeHost implements CodeHost {
   }
 }
 
+/**
+ * The environment handed to a `gh` child. Our own `DEBUG` is cleared deliberately:
+ * `DEBUG` is a very generic name and the GitHub CLI honours it as its debug switch (an
+ * alias for `GH_DEBUG`), so a pipeline run with DEBUG on made every gh call trace its
+ * HTTP requests onto stderr — noise in the report, and, merged into stdout, noise inside
+ * the diff handed to the model. The empty string reads as off (checked against gh 2.102).
+ */
 function ghEnv(): Record<string, string> {
-  return env.GH_TOKEN ? { GH_TOKEN: env.GH_TOKEN, GH_ENTERPRISE_TOKEN: env.GH_TOKEN } : {};
+  const base: Record<string, string> = { DEBUG: '', GH_DEBUG: '' };
+  if (!env.GH_TOKEN) return base;
+  return { ...base, GH_TOKEN: env.GH_TOKEN, GH_ENTERPRISE_TOKEN: env.GH_TOKEN };
 }
 
 function requireRepoSlug(): string {

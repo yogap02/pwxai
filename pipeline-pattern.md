@@ -238,6 +238,16 @@ matters, express it as a check over the output.
 Known limit, and worth stating in your own version too: this catches an *invented* capability, not
 a *substituted* one. Existence is checkable; sufficiency is not.
 
+A fourth gate sits over the block the model finally writes, and it exists because naming members is
+not enough. A generated block is **refused** outright — not repaired — when it calls the Playwright
+`page` API or `expect()` itself, because either one means it reached past the page object and is
+therefore outside the capability index. The prompt forbids both in plain words, and the repo's own
+self-checks fail the build over both. On the first real PR the pipeline was pointed at, the digest
+wrote blocks that did it anyway: the spec stopped compiling (nine TypeScript errors, taking twelve
+handwritten tests down with it), seven more blocks asserted nothing at all, and the run called itself
+a **success**. The whole thesis of this pattern, in one run. What was missing was not a stronger
+sentence in the prompt — it was a check that ran *after* generation, over what was actually written.
+
 ### Enforcement asymmetry, decided by the cost of a false positive
 
 The same rule can block at one stage and only report at another. That is a policy, not an
@@ -250,6 +260,13 @@ inconsistency, and the decision procedure is always the same:
   available.
 - A rule that matches **API calls** can be enforced; a rule that matches **English prose** should
   report until the log shows it firing only on real cases.
+
+The same asymmetry decides *how* a violation is handled, not only whether. An `import` inside a
+managed region is **stripped**, because an import there is a syntax error and removing it repairs the
+file — the block means the same thing afterwards. A block that calls `page`/`expect` directly is
+**refused**, because deleting the offending lines leaves a test that still passes and asserts nothing.
+Both are the same class of rule; the difference is whether the repair can quietly weaken the artifact.
+Strip when the repair cannot change what the artifact claims, refuse when it can.
 
 ### Fail open, always
 
@@ -389,6 +406,12 @@ No path merges anything. Three supporting rules:
   directories it was allowed to write.
 - **Persist the agent's summary, never its transcript.** A transcript carries page content from the
   environment under test.
+- **The repo's own gates run over the output, not only before it.** CI runs `typecheck && self-checks`
+  ahead of the pipeline, so nothing the pipeline writes has been through them — and a spec that does
+  not compile is not a small thing, because one broken block breaks the whole file, every handwritten
+  test in it included. So the ship step runs both gates again over the working tree and **fails the
+  stage** rather than pushing when they fail. It stays non-fatal: the test results are still the
+  evidence, and what is refused is the delivery.
 
 ### Test results are recorded as-is
 

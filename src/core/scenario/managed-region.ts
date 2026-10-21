@@ -247,6 +247,39 @@ function trimBlankLines(lines: readonly string[]): string {
   return lines.slice(start, end).join('\n');
 }
 
+/**
+ * What a managed block may NOT contain — the write path's second guard, beside
+ * `stripBlockImports`.
+ *
+ * A generated block that calls the Playwright `page` API directly, or calls `expect()`
+ * itself, has escaped the page object: it is outside the capability index, it cannot heal,
+ * and a reviewer cannot read it as a capability. It gets there because the scenario needs
+ * something the page object cannot express *yet* — an HTTP-level assertion, say — and the
+ * model reaches past the POM instead of reporting the gap. The outcome AGENTS.md names is
+ * the right one: the scenario is `blocked` and becomes a builder work order.
+ *
+ * Withholding the block is the whole point, and stripping is NOT an option here. Unlike an
+ * import inside the region (a syntax error, so removing it only repairs), deleting the
+ * `page`/`expect` lines leaves a test that still PASSES and asserts nothing — exactly the
+ * silent green this repo exists to prevent. So this reports, and stage 2 refuses the block.
+ *
+ * `page.` is matched on the raw text, which is what the spec self-check scans. `expect(` is
+ * matched with comments stripped, so a block that merely MENTIONS `expect(x)` in a note is
+ * not condemned for it — and `expectLoaded(` does not match, because `expect` must be
+ * followed by `(`.
+ */
+export function blockViolations(code: string): string[] {
+  const out: string[] = [];
+  if (/\bpage\s*\./.test(code)) {
+    out.push('calls the Playwright `page` API directly');
+  }
+  const bare = code.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
+  if (/\bexpect\s*\(/.test(bare)) {
+    out.push('calls `expect()` itself rather than a page-object assertion');
+  }
+  return out;
+}
+
 export function mergeManagedRegion(
   existing: readonly ManagedBlock[],
   incoming: ReadonlyMap<string, { code: string; scenarioContentHash: string }>,

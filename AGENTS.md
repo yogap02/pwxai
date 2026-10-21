@@ -85,6 +85,37 @@ gh workflow run test-pipeline -f from_scenarios=true   # start a run by hand, no
   removal as a degradation. It runs on held blocks too, so a spec already committed broken repairs
   itself on the next digest. Clean code comes back byte-identical — the hold-as-is path is a
   fixpoint.
+- **A managed block that reaches past the page object is refused, never stripped.** `blockViolations`
+  (`src/core/scenario/managed-region.ts`) reports a block that calls the Playwright `page` API
+  directly or calls `expect()` itself; stage 2 withholds such a block entirely and turns its scenario
+  into an `unbuildable` work order, which is the shape the capability index already names for "the
+  POM cannot express this yet". Withholding is the point, and stripping is not an option here:
+  unlike an import, removing the offending lines leaves a test that still PASSES and asserts nothing.
+  It is the write-path half of the two spec self-checks, and it was earned the hard way. On the first
+  real PR the pipeline was pointed at, the digest wrote blocks that called `page.request.get` and
+  `expect()` directly, the spec stopped compiling — nine TypeScript errors, taking twelve handwritten
+  tests in that file down with it — seven more blocks asserted nothing at all (the report-only
+  backstop flagged exactly those), and the run called itself a **success**.
+- **The pipeline's gates run over its OUTPUT too, at the ship step.** CI runs
+  `typecheck && self-checks` immediately BEFORE `npm run pipeline`, so nothing the pipeline writes
+  has ever been through them: that same run's uncompilable spec was committed, pushed and opened as
+  a PR under a green report. `shipGate()` (stage 8) runs both scripts over the working tree and
+  **fails the stage** when either fails, instead of pushing. Returning a string would report a
+  *succeeded* git stage and a run that shipped nothing and said nothing; a failed stage is what puts
+  it under "Needs attention". The stage stays `fatal: false`, so the run still completes and its test
+  results still stand — the refusal is about the delivery, not the evidence.
+- **A child process's stdout is the data; stderr is diagnostics, and our `DEBUG` is not its
+  switch.** `runStageProcess` returns `stdout` and the merged `output` separately, and a caller that
+  PARSES a result — JSON, a diff, a porcelain listing — must read `stdout`. Merged, a tool's chatter
+  becomes a parse error, or worse, noise silently inside the payload. The concrete case: `gh` honours
+  `DEBUG` as its debug switch (an alias for `GH_DEBUG`), and this pipeline hands every child its own
+  `DEBUG`, so a run with `DEBUG=true` — which is what `.env` and the CI definition ship — made every
+  `gh` call trace its HTTP requests onto stderr. Stage 1 then died on perfectly valid JSON
+  ("expected JSON output"), and 297 characters of `* Request took 537ms` landed inside the diff fed
+  to the model. Two bugs behind three green CI runs: those runs used `--from-scenarios`, which skips
+  stage 1 entirely, so the PR path had never been exercised. `ghEnv()` now clears `DEBUG`/`GH_DEBUG`,
+  and stage 8's "anything to ship?" reads `stdout`, or a git line-ending warning on stderr would look
+  like a change and push an empty branch.
 - **The scaffold and the writer agree byte-for-byte.** A domain's FIRST spec is composed whole by
   `scaffoldManagedSpec` (it needs a closed `test.describe()`); every later write goes through
   `upsertManagedRegion`. The file the scaffold writes is read back and rewritten by the writer on the

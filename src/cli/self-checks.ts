@@ -19,7 +19,7 @@ import { readdir, readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { rehydrate, toRepoRelative, isRepoRelativePosix, assertRepoRelativePosix, joinRepo } from '../core/util/paths.js';
 import { parseBlock, parseScenarioFile, hash } from '../core/scenario/parser.js';
-import { renderManagedRegion, readManagedRegion, upsertManagedRegion, scaffoldManagedSpec, mergeManagedRegion, stripBlockImports, MANAGED_START, MANAGED_END, type ManagedBlock } from '../core/scenario/managed-region.js';
+import { renderManagedRegion, readManagedRegion, upsertManagedRegion, scaffoldManagedSpec, mergeManagedRegion, stripBlockImports, blockViolations, MANAGED_START, MANAGED_END, type ManagedBlock } from '../core/scenario/managed-region.js';
 import { repairTruncatedJson, extractJson } from '../ai/model-client.js';
 import { substitute } from '../ai/prompts/load.js';
 import { planTier } from '../planning/planner.js';
@@ -909,6 +909,49 @@ check('no spec file calls expect() — assertions live in the page objects', asy
     offenders.length === 0,
     `assertions belong in the POM, but expect() was found in: ${offenders.join(', ')}`,
   );
+});
+
+check('a block that reaches past the page object is refused, never written', async () => {
+  // The write-path half of the two checks above. It is deliberately not a strip: deleting
+  // the offending lines would leave a test that passes and asserts nothing, which is the
+  // silent green this repo exists to prevent. Refusal is a pure decision, so it is driven
+  // here with synthetic code — and a real run proved the need: a PR-triggered digest wrote
+  // 11 blocks, of which several called `page.request.get` and `expect()` directly, produced
+  // 9 TypeScript errors and took 12 handwritten tests down with them. The run called itself
+  // a success.
+  assert(
+    blockViolations('await page.request.get("/instagram", { maxRedirects: 0 });').length === 1,
+    'a raw page call must be refused',
+  );
+  assert(
+    blockViolations("expect(href, 'the cta points at the portfolio').toBe('/portfolio');").length === 1,
+    'a raw expect() must be refused',
+  );
+  assert(
+    blockViolations(
+      '// expect(title).toBeTruthy() — the POM asserts this\nconst landingPage = new LandingPage(page);\nawait landingPage.expectLoaded();',
+    ).length === 0,
+    'a block that uses the POM, and only MENTIONS expect() in a comment, is clean',
+  );
+
+  // And the digest must apply it, or the guard never fires.
+  const digest = stripComments(await readFile(rehydrate('src/stages/02-testcase-digest.ts'), 'utf8'));
+  assert(/blockViolations\(gen\.code\)/.test(digest), 'stage 2 must refuse such a block before writing it');
+  assert(/verdict|record\(/.test(digest), 'the refusal must be recorded as a verdict, not swallowed');
+});
+
+check('generated output is gated before it ships, not only before it is generated', async () => {
+  // CI runs `typecheck && self-checks` immediately BEFORE `npm run pipeline`, so the code
+  // the pipeline writes has never been through them. The failure is not subtle once you see
+  // it — an uncompilable spec was committed, pushed and opened as a PR under a green run —
+  // but nothing said so, which is what makes it this repo's kind of bug.
+  const src = stripComments(await readFile(rehydrate('src/stages/08-git.ts'), 'utf8'));
+  for (const script of ['typecheck', 'self-checks']) {
+    assert(src.includes(`'${script}'`), `the ship gate must run \`npm run ${script}\` over the output`);
+  }
+  const gated = src.indexOf('await shipGate()');
+  const shipped = src.indexOf('await codeHost.createBranch(');
+  assert(gated >= 0 && shipped >= 0 && gated < shipped, 'the gate must refuse BEFORE a branch is created');
 });
 
 check('every expect() in a page object passes an assertion message', async () => {
@@ -2036,6 +2079,40 @@ check('TEST_GREP is an operator override, never a standing CI default', async ()
   }
   // And the manual door has to exist, or a human has no way in without a PR.
   assert(/workflow_dispatch:/.test(workflow), 'the workflow must be startable by hand');
+});
+
+check('a child is not handed our DEBUG, which it may read as its own switch', async () => {
+  // `DEBUG` is a generic name and gh honours it as its trace switch (an alias for
+  // GH_DEBUG). Leaking it appended an HTTP trace to stderr, which merged into the diff
+  // stage 1 hands the model: nothing failed, the model just read noise. Silent, therefore
+  // checked. This is the general shape of the hazard for any third-party CLI we spawn.
+  const src = await readFile(rehydrate('src/delivery/github.ts'), 'utf8');
+  const start = src.indexOf('function ghEnv(');
+  assert(start >= 0, 'ghEnv() must remain the single place a gh child environment is built');
+  const next = src.indexOf('\nfunction ', start + 1);
+  const fn = src.slice(start, next === -1 ? undefined : next);
+  assert(/DEBUG:\s*''/.test(fn), "ghEnv() must clear DEBUG — gh reads it as GH_DEBUG and traces HTTP");
+  assert(/GH_DEBUG:\s*''/.test(fn), 'ghEnv() must clear GH_DEBUG too, which is the same switch');
+});
+
+check('a parsed result comes from stdout, never the merged stream', async () => {
+  // `output` merges stderr for a human reading a failure; stderr is diagnostics, and
+  // tools write warnings there as a matter of course. Parsing it as data turns chatter
+  // into a parse error, or — worse, and silently — into noise inside a payload like the
+  // diff. So a result is read from `stdout`, and the merge stays for error messages only.
+  const runner = await readFile(rehydrate('src/core/orchestration/stage-runner.ts'), 'utf8');
+  assert(
+    /stdout:\s*redact\(stdout\)/.test(runner),
+    'runStageProcess must expose stdout separately from the merged output',
+  );
+  const gh = await readFile(rehydrate('src/delivery/github.ts'), 'utf8');
+  assert(!/JSON\.parse\(res\.output\)/.test(gh), 'never parse JSON from the merged stdout+stderr');
+  assert(/return res\.stdout/.test(gh), 'the code host must return stdout as its data');
+  const git = await readFile(rehydrate('src/stages/08-git.ts'), 'utf8');
+  assert(
+    !/status\.output\.trim\(\) === ''/.test(git),
+    'the shippable check must read stdout: a git warning on stderr would look like a change to push',
+  );
 });
 
 check('debug is registered where a run can read it, and is actually emitted', async () => {

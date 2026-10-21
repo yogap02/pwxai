@@ -21,7 +21,7 @@ import {
   type DomainOutcome,
 } from '../core/scenario/manifest.js';
 import { renderDigestSummary } from '../core/orchestration/run-summary.js';
-import { readManagedRegion, upsertManagedRegion, renderManagedRegion, mergeManagedRegion, stripBlockImports, scaffoldManagedSpec } from '../core/scenario/managed-region.js';
+import { readManagedRegion, upsertManagedRegion, renderManagedRegion, mergeManagedRegion, stripBlockImports, blockViolations, scaffoldManagedSpec } from '../core/scenario/managed-region.js';
 import { loadDomainMap, resolveDomain, backfillDomainEntry, readDomainContext, instructionFileFor, type DomainEntry } from '../core/scenario/domain-map.js';
 import { applyScenarioTags, dateTagIn } from '../core/scenario/test-tags.js';
 import { viewportProfileIn, viewportCapabilityGap, type ViewportProfile } from '../core/scenario/viewport.js';
@@ -272,7 +272,28 @@ export async function runDigest(
       if (backstop.flags.length > 0) {
         ctx.recordDegradation(stageName, `backstop: ${backstop.flags.length} flag(s) in ${key}`);
       }
-      for (const s of toGenerate) generatedTitles.push(s.scenario.title);
+      for (const s of toGenerate) {
+        const gen = byId.get(s.scenario.id);
+        // A block that reached past the page object is not written AT ALL. It would not
+        // compile against the POM's surface (TS2339/TS2554, the failures AGENTS.md records
+        // from a bare-name catalog), and — because one broken block breaks the file — it
+        // would take every handwritten test in the same spec down with it. The scenario
+        // goes back to being a builder work order, which is where a capability gap belongs,
+        // and that is what puts it under "Needs attention" instead of into a green PR.
+        const violations = gen === undefined ? [] : blockViolations(gen.code);
+        if (violations.length === 0) {
+          generatedTitles.push(s.scenario.title);
+          continue;
+        }
+        byId.delete(s.scenario.id);
+        record(s.scenario, 'unbuildable', `generated block reached past the page object: ${violations.join('; ')}`);
+        unbuildable.push({ scenario: s.scenario, missingCapabilities: violations });
+        ctx.recordDegradation(
+          stageName,
+          `${key}: refused the generated block for "${s.scenario.title}" — ${violations.join('; ')}; it is a page-object work order, not a test`,
+        );
+        dbg('digest', 'refused-block', { domain: key, scenario: s.scenario.id, violations });
+      }
     }
 
     // Emit generated + unbuildable blocks. Held blocks were added above.

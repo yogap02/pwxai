@@ -364,7 +364,7 @@ than widening the search.
 | 5 | `test-plan` | agent picks a scope; fails open to the full suite |
 | 6 | `playwright-test` | recorded as-is, never reverted |
 | 7 | `heal-apply` | non-fatal; only a verified repair is folded in |
-| 8 | `git` | skipped when nothing shippable |
+| 8 | `git` | skipped when nothing shippable; **refuses to ship** output that fails `typecheck`/`self-checks` |
 
 ## What you supply
 

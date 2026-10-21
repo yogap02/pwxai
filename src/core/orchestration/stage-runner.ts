@@ -173,6 +173,12 @@ function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> 
  * Spawn a child stage process with timeout + signal handling + output
  * reassembly. Used by the builder (CLI-shaped) and playwright stages.
  *
+ * Two outputs, and the difference is load-bearing: `stdout` is the DATA, `output` is
+ * `stdout` and `stderr` merged, which is what a human wants when reading a failure. A
+ * caller that PARSES a result — JSON, a diff, a porcelain listing — must read `stdout`.
+ * Tools write diagnostics to stderr as a matter of course, so merging the two turns
+ * chatter into a parse error, or worse into noise silently inside the payload.
+ *
  * `shell` defaults to true on Windows so that PATH lookups find `.cmd` shims
  * (`npx`, `gh`). That default is a trap for any argument containing a shell
  * metacharacter: cmd.exe re-parses the whole command line, so a Playwright grep
@@ -184,7 +190,7 @@ export async function runStageProcess(
   command: string,
   args: readonly string[],
   opts: { timeoutMs: number; cwd?: string; env?: Record<string, string>; shell?: boolean },
-): Promise<{ ok: boolean; output: string; exitCode: number | null; timedOut: boolean }> {
+): Promise<{ ok: boolean; stdout: string; output: string; exitCode: number | null; timedOut: boolean }> {
   return new Promise((resolveP) => {
     const child = spawn(command, [...args], {
       cwd: opts.cwd,
@@ -226,6 +232,7 @@ export async function runStageProcess(
       stderr = Buffer.concat(chunksErr).toString('utf8');
       resolveP({
         ok: code === 0 && !timedOut,
+        stdout: redact(stdout).trim(),
         output: redact(`${stdout}\n${stderr}`).trim(),
         exitCode: code,
         timedOut,
