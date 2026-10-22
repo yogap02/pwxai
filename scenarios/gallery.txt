@@ -37,6 +37,13 @@ Notes: products, diecast and jewelry all return zero. products is used because i
 
 ---
 
+TEST: The gallery offers a search box
+Tags: @smoke @core
+Expected: The search input and its submit control are both visible on the gallery
+Notes: The form is the entry point to the ?q= filter. Present-but-unusable is a real failure mode here: the submit button is an icon-only button with no accessible name, so a test that looks for it by role name finds nothing.
+
+---
+
 TEST: The search box filters the gallery on submit
 Tags: @smoke @core
 Expected: Typing keycap into the search box and submitting navigates to ?q=keycap and the grid lists exactly 2 proofs
