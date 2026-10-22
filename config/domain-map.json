@@ -12,5 +12,21 @@
     "pomDir": "src/page-objects/landing-page",
     "className": "LandingPage",
     "confidence": 1.0
+  },
+  "gallery": {
+    "description": "The public portfolio gallery at /en/portfolio: a browsable index of photographic proofs, with a category filter (all/macro/products/diecast/jewelry), a text search, and a lightbox that opens a proof full-size.",
+    "entryPaths": ["/en/portfolio"],
+    "needsAuth": false,
+    "entryDiscoverySteps": [
+      "Open BASE_URL + '/en/portfolio' directly. The gallery is public and needs no sign-in.",
+      "The nav 'Portfolio' link goes here, so it is reachable from the landing page — but enter by URL, because a landing-page nav assertion is the landing-page domain's job.",
+      "Filtering and searching are URL-driven: '?category=<pill>' and '?q=<term>'. The search box does NOT filter as you type — it navigates on submit (Enter or the submit button). A test that types and asserts without submitting will see the unfiltered list.",
+      "'?category=all' and no parameter are the same list. The empty result renders 'NO MICROSCOPIC PROOFS FOUND.' inside the grid.",
+      "The card lightbox is a 'div.fixed.inset-0' overlay with no role=\"dialog\": it closes on the backdrop or the close button, NOT on Escape."
+    ],
+    "specDir": "tests/gallery",
+    "pomDir": "src/page-objects/gallery",
+    "className": "GalleryPage",
+    "confidence": 1.0
   }
 }

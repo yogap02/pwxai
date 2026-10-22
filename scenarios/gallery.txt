@@ -1,0 +1,94 @@
+Gallery page scenarios for fotogaper (https://foto.gappp.my.id/en/portfolio).
+One .txt per feature area. Blocks separated by `---`. The ID of each block is a
+hash of its normalised TEST title. Edit by hand, or let stage 1 append.
+See pipeline-pattern.md §3 "Scenarios are plain text, and they are the source of truth".
+
+Every fact here was live-probed 2026-10-22 — see src/page-objects/gallery/instruction.md
+for the measurements behind them, and config/scope-rules.md for what is
+deliberately NOT tested (three real product defects live there).
+
+---
+
+TEST: The gallery page loads with its heading
+Tags: @smoke @core
+Expected: Opening /en/portfolio shows the h1 "The Gallery." and the intro describing an index of technical macro proofs
+Notes: Live-probed 2026-10-22. The route returns 200 with no console errors. The h1 is "The Gallery." including the full stop.
+
+---
+
+TEST: The gallery offers every category filter
+Tags: @smoke @core
+Expected: The category pills all, macro, products, diecast and jewelry are each visible
+Notes: Five pills, in that order, each a button with data-testid="category-pill-<name>".
+
+---
+
+TEST: A category filter narrows the gallery to its proofs
+Tags: @smoke @core
+Expected: Clicking the macro pill navigates to ?category=macro and the grid lists exactly 2 proofs
+Notes: Filtering is a navigation, not an in-place state change. macro is the only non-empty category, so it is the one the mechanism is asserted on — diecast is a known defect, see scope-rules.
+
+---
+
+TEST: A category with no proofs shows the empty state
+Tags: @core
+Expected: Clicking the products pill navigates to ?category=products, shows "No microscopic proofs found." inside the grid, and lists no cards
+Notes: products, diecast and jewelry all return zero. products is used because it is empty for the honest reason (nothing uploaded), not the diecast vocabulary bug. The line DISPLAYS in caps ("NO MICROSCOPIC PROOFS FOUND.") because the element is text-transform: uppercase — the DOM text is sentence case, and that is what an assertion must match.
+
+---
+
+TEST: The search box filters the gallery on submit
+Tags: @smoke @core
+Expected: Typing keycap into the search box and submitting navigates to ?q=keycap and the grid lists exactly 2 proofs
+Notes: The box does NOT filter as you type — only submitting navigates. A fill without a submit leaves all 3 cards and would assert nothing.
+
+---
+
+TEST: A search with no matches shows the empty state
+Tags: @core
+Expected: Searching for zzznotfound navigates to ?q=zzznotfound and the grid shows "No microscopic proofs found." with no cards
+Notes: Confirms the empty state is reachable from the search path too, not only from a pill.
+
+---
+
+TEST: A category filter and a search compose
+Tags: @core
+Expected: With ?q=keycap&category=macro the grid lists exactly 2 proofs, so the two filters apply together rather than replacing one another
+Notes: Both filters are URL parameters, and the server applies them together. keycap alone is 2 and macro alone is 2; the composition is 2, which is a weak signal — the stronger case is a search whose matches span categories, but the fixture only has 3 proofs.
+
+---
+
+TEST: Every gallery card carries its title, category and camera line
+Tags: @core
+Expected: Each proof card shows an h4 title, a category label and a camera line, so no card renders as a blank tile
+Notes: Two cards share the title "Keycaps Artisan" and differ only by their shot count, so a title-only assertion cannot distinguish them. This asserts the card is structurally complete instead.
+
+---
+
+TEST: The gallery proof images actually load
+Tags: @core
+Expected: Every card image reports naturalWidth greater than 0, so the proof is rendered rather than the alt text
+Notes: The proofs come from Google's CDN through next/image. An img that fails to fetch is still visible and still has a bounding box, so toBeVisible passes on a broken image — naturalWidth is the only honest check.
+
+---
+
+TEST: The gallery lightbox opens the proof that was clicked and closes again
+Tags: @smoke @core
+Expected: Clicking a card opens a lightbox showing that card's title, and the close button dismisses it
+Notes: Closes on the close button and on a backdrop click; Escape does NOT close it, and it has no role="dialog" — both are accessibility defects recorded in instruction.md and deliberately not asserted.
+
+---
+
+TEST: The gallery links back to the landing page
+Tags: @core
+Expected: The "Back to Laboratory" link points at /en
+Notes: The back link sits above the h1 and is the only route back other than the nav.
+
+---
+
+TEST: The gallery layout fits a mobile viewport
+Tags: @smoke @core
+Expected: At 390x844 the gallery does not scroll sideways and no element spills out of the container it is laid out in
+Notes: Probed at 390x844: scrollWidth equals clientWidth and no element crosses the right edge. Asserted through the shared viewport capability, so the scenario names the profile rather than the pixel width.
+
+---
