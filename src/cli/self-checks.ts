@@ -2449,6 +2449,10 @@ check('the report channel carries the result and the scope, so a narrowed run ca
     'a blocked scenario must be named, not only counted',
   );
   assert(
+    msg.includes('expectHeroHeadline()'),
+    'and it must name what the page object is missing — "blocked" without what to add is a dead end, and the PR body already says it',
+  );
+  assert(
     msg.includes('<b>Testing Status:</b> ❌ 1 test failed'),
     'the product status must be stated, labelled, and red when a test failed',
   );

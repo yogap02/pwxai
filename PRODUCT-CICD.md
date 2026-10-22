@@ -14,8 +14,13 @@ deploy lands
       pr + source_repo                  |
                                         +-- agent stages
                                         +-- opens a PR here
-                                        +-- comments the result on that PR
+                                        +-- comments on that PR if stage 1/2 fails
 ```
+
+Where the result actually lands: a **PR here** (stage 8, carrying scope, coverage and the test
+result) and the **chat** (stage 9). The comment back on the source PR is a *failure* notification
+only — stage 1 or stage 2 aborting, so the product side is not left with a dispatch that vanished —
+which is why a product PR whose run went fine carries no comment from this pipeline.
 
 Nothing is cloned across the boundary: the product sends one `workflow_dispatch`
 call and the run happens here. What crosses is the **testing context** —
@@ -37,22 +42,19 @@ source PR, stage 8 opening a PR here, stage 1 commenting back. It is wired to
 cannot see a private product repo. That makes `gh pr view --repo <product>`
 fail with a 404 the moment the source repo is not this one.
 
-**`.github/workflows/pipeline.yml`, line 70.** Replace:
+**`.github/workflows/pipeline.yml`** — the `GH_TOKEN:` line in the job's `env:` block (line 70
+before this block grew its comment). It read `${{ secrets.GITHUB_TOKEN }}`; **applied** as:
 
 ```yaml
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # ... the comment here explains why, at the line itself ...
+      GH_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
 ```
 
-with:
-
-```yaml
-      # What every `gh` call authenticates with. A PAT rather than the
-      # Actions-issued GITHUB_TOKEN, because stage 1 reads the SOURCE PR — and that
-      # PR can live in another, private repo, which an Actions token can never
-      # reach: it is scoped to the repo this workflow runs in. The default token
-      # still does checkout and `git push`; this only feeds `gh`.
-      GH_TOKEN: ${{ secrets.GH_PAT }}
-```
+The fallback is a deliberate difference from this note's original wording, and it is not a
+convenience: an absent `GH_PAT` says the same thing an absent `SOURCE_REPO_SLUG` says — there is no
+other repo to reach — so a single-repo run keeps working on the boilerplate's default secret with no
+PAT at all. A `GH_PAT` that is set but expired or under-scoped does **not** fall back, because a
+non-empty secret wins, so a stale token still fails loudly at stage 1 rather than silently.
 
 That is the whole code change. No TypeScript is touched — `ghEnv()` in
 `src/delivery/github.ts` only forwards the token to `gh` children, and no
@@ -60,8 +62,12 @@ self-check asserts where it came from. The `permissions: contents: write` block
 still governs checkout and `git push`, and `gh pr create` now authenticates as
 the PAT instead.
 
-Verified: `npm run self-checks` reports **86 passed, 0 failed** with this change
-in place, identical to the baseline before it.
+Verified: `npm run self-checks` reports **87 passed, 0 failed** with this change in place (86
+before it, plus the capability-gate check it did not touch).
+
+Verified in CI, twice: `pr=2`, `source_repo=yogap02/fotogaper`, `dry_run=true` — stage 1 read PR #2
+from the product repo (the run's risk areas are fotogaper's `ci.yml` and `deploy.yml`), so the PAT
+reaches the product half of its permissions.
 
 ## 2. What must exist
 

@@ -255,7 +255,12 @@ function coverageLines(manifest: RunManifest): string[] {
   if (blocked.length === 0) return out;
   out.push(`- **${blocked.length} blocked** — the page objects cannot express these yet:`);
   for (const w of blocked.slice(0, 5)) {
-    out.push(`  - ${w.scenario.title}`);
+    // Named WITH the gap, exactly as the PR body names it: a blocked scenario without what to
+    // add is a dead end for whoever reads this on a phone.
+    const why = [...new Set(w.missingCapabilities)];
+    out.push(
+      `  - ${w.scenario.title}${why.length > 0 ? ` — reason: ${why.map((c) => `\`${c}\``).join(', ')}` : ''}`,
+    );
   }
   if (blocked.length > 5) out.push(`  - …and ${blocked.length - 5} more`);
   return out;
