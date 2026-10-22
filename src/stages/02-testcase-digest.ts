@@ -450,6 +450,9 @@ export async function runDigest(
     for (const [id, messages] of verdict.byBlock) {
       const scenario = scenariosById.get(id);
       if (scenario === undefined || !allBlocks.has(id)) continue;
+      // Captured BEFORE the work order replaces it: this is the code that failed to compile, and
+      // it is the only evidence of what the model actually wrote.
+      const refusedCode = allBlocks.get(id)?.code ?? '';
       // Replaced, not deleted: the scenario keeps its place in the file as a work order, which is
       // what puts it under "Needs attention" carrying the compiler's own words.
       allBlocks.set(id, {
@@ -465,7 +468,15 @@ export async function runDigest(
         stageName,
         `${key}: refused the generated block for "${scenario.title}" — it does not compile (${messages.join('; ')}); the scenario is a page-object work order, not a test`,
       );
-      dbg('digest', 'refused-block-uncompilable', { domain: key, scenario: id, messages });
+      // The refused code goes in the record, not just the diagnostics. "TS1005: ';' expected" with
+      // no source is unactionable: whoever picks up the work order has to re-run the model to see
+      // what it wrote, and a re-run answers differently. The code is the evidence.
+      dbg('digest', 'refused-block-uncompilable', {
+        domain: key,
+        scenario: id,
+        messages,
+        refusedCode,
+      });
     }
     if (verdict.byBlock.size > 0) {
       composed = composeSpec();

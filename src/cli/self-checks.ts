@@ -339,6 +339,44 @@ check('a spec imports the page-object class its generated blocks instantiate', a
   );
 });
 
+check('a private member is not a capability the spec can call', async () => {
+  // The classifier is handed every extracted member and told to use ONLY those, so a private
+  // helper in the list is an instruction to call something a spec legally cannot. It happened:
+  // the gallery page object's `expectGridSettled` (a wait, not an assertion) was offered, the
+  // classifier answered with it, and stage 2 wrote a block calling it. The compile guard caught
+  // the block — TS2341 — which is the backstop working, but the gate should never have offered
+  // it. The landing page never tripped this only because nothing generated reached for one of
+  // its privates; a second domain found it immediately.
+  const surface = await extractPomSurface('src/page-objects/gallery/index.ts');
+  for (const priv of ['loc', 'byCopy', 'expectGridSettled', 'grid', 'cards']) {
+    assert(!surface.methods.has(priv), `a private member must not be offered as a capability: ${priv}`);
+  }
+  for (const pub of ['goto', 'expectHeading', 'filterByCategory', 'search', 'openLightbox']) {
+    assert(surface.methods.has(pub), `a public member must still be offered: ${pub}`);
+  }
+  // Getters are read by the spec, so a public one stays; `heading` is public and asserted on.
+  assert(surface.properties.has('heading'), 'a public getter stays part of the surface');
+
+  // And the same over every page object in the repo, so the next one cannot reintroduce it.
+  const poms = await listRepoFiles('src/page-objects', (f) => f.endsWith('.ts'));
+  const leaked: string[] = [];
+  for (const pom of poms) {
+    const s = await extractPomSurface(pom);
+    const src = await readFile(rehydrate(pom), 'utf8');
+    for (const member of [...s.methods, ...s.properties]) {
+      const decl = new RegExp(
+        `^\\s*(?:private|protected)\\s+(?:async\\s+)?(?:get\\s+)?${member}\\b`,
+        'm',
+      );
+      if (decl.test(src)) leaked.push(`${pom}: ${member}`);
+    }
+  }
+  assert(
+    leaked.length === 0,
+    `private members reached the capability surface: ${leaked.join(', ')}`,
+  );
+});
+
 check('the generator is given member signatures, so a call can supply its arguments', async () => {
   // The capability list was names only, so `expectHeroCtaTargets(href: string)`
   // read like a zero-argument assertion; a generated block called it with none and

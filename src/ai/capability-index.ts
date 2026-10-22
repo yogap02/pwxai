@@ -60,8 +60,18 @@ export async function extractPomSurface(pomFileRepoRelative: string): Promise<Po
   const params = new Map<string, string>();
 
   // Method declarations: `async name(` / `name(` at member position.
-  for (const m of source.matchAll(/^\s*(?:public\s+|private\s+|protected\s+)?(?:async\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm)) {
-    const name = m[1]!;
+  //
+  // `private` and `protected` members are NOT capabilities, and advertising them is a silent
+  // trap: the classifier is handed every name here and told to use only these, so it answered
+  // with `expectGridSettled` — a private helper of the gallery page object — and stage 2 wrote
+  // a block that called it. The compile guard caught the block (TS2341), which is the backstop
+  // working, but the gate should never have offered it: a name a spec cannot legally call is
+  // not part of the surface the spec programs against.
+  for (const m of source.matchAll(
+    /^\s*(?:(public)\s+|(private|protected)\s+)?(?:async\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm,
+  )) {
+    if (m[2] !== undefined) continue;
+    const name = m[3]!;
     if (RESERVED.has(name)) continue;
     methods.add(name);
     // The parameter list, when the signature does not wrap. Bounded to this line
@@ -74,14 +84,21 @@ export async function extractPomSurface(pomFileRepoRelative: string): Promise<Po
       if (looksLikeParams(text)) params.set(name, text);
     }
   }
-  // Properties / getters: `name = ...` or `get name()`.
-  for (const m of source.matchAll(/^\s*(?:public\s+|private\s+|protected\s+)?(?:readonly\s+)?(?:get\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*(?::[^=\n]+)?=\s*.*(?:locator|getBy)/gm)) {
-    const name = m[1]!;
+  // Properties / getters: `name = ...` or `get name()`. Private/protected excluded for the
+  // same reason as methods — a spec cannot read `this.privateThing`.
+  for (const m of source.matchAll(
+    /^\s*(?:(public)\s+|(private|protected)\s+)?(?:readonly\s+)?(?:get\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*(?::[^=\n]+)?=\s*.*(?:locator|getBy)/gm,
+  )) {
+    if (m[2] !== undefined) continue;
+    const name = m[3]!;
     properties.add(name);
     locators.add(name);
   }
-  for (const m of source.matchAll(/^\s*(?:public\s+|private\s+|protected\s+)?get\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm)) {
-    properties.add(m[1]!);
+  for (const m of source.matchAll(
+    /^\s*(?:(public)\s+|(private|protected)\s+)?get\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm,
+  )) {
+    if (m[2] !== undefined) continue;
+    properties.add(m[3]!);
   }
 
   return { file: pomFileRepoRelative, methods, properties, locators, params };
