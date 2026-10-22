@@ -48,8 +48,36 @@ export class GitHubCodeHost implements CodeHost {
 
   async createBranch(name: string, fromBranch: string): Promise<void> {
     await this.git(['fetch', 'origin', fromBranch]);
-    await this.git(['checkout', '-B', name, `origin/${fromBranch}`]);
+    // Create the delivery branch AT HEAD, never by checking the tree out to `origin/<base>`.
+    //
+    // `git checkout -B <name> origin/<base>` looks right and is destructive whenever HEAD is not
+    // already the base — which is every LOCAL run, because a developer runs the pipeline from the
+    // branch they are working on. Measured in a throwaway worktree: HEAD was three commits ahead
+    // of origin/main, the checkout moved the tree back to origin/main, and every file those
+    // commits added (the whole gallery domain) vanished from the working directory. Nothing was
+    // lost from git, but the run then committed an empty tree — and with a dirty file it aborted
+    // outright, which is how this surfaced: "local changes would be overwritten by checkout".
+    //
+    // In CI HEAD *is* origin/<base>, so this is the same commit either way and the change is
+    // invisible there. Locally it means the generated tests sit on top of the work actually in
+    // the tree, which is what the person running it meant.
+    await this.git(['checkout', '-B', name]);
+    // Say so when the base was not HEAD. The PR then carries the branch's own commits too, and a
+    // reviewer looking at a diff larger than "the tests this run wrote" deserves to know why
+    // rather than guess.
+    const head = await this.gitCapture(['rev-parse', 'HEAD']);
+    const base = await this.gitCapture(['rev-parse', `origin/${fromBranch}`]);
+    if (head !== base) {
+      this.baseDivergence = `${name} was branched from the working tree's HEAD (${head.slice(0, 7)}), not origin/${fromBranch} (${base.slice(0, 7)}) — the PR diff includes this branch's own commits`;
+    }
   }
+
+  /**
+   * Set when the delivery branch was not based on `origin/<base>` (see `createBranch`). Stage 8
+   * records it as a degradation: the run still ships, but the PR is not the one-commit diff a
+   * reviewer expects, and that has to be stated rather than discovered in the diff.
+   */
+  baseDivergence: string | null = null;
 
   async commitAll(message: string): Promise<void> {
     await this.git(['add', '-A']);
@@ -116,6 +144,13 @@ export class GitHubCodeHost implements CodeHost {
   private async git(args: readonly string[]): Promise<void> {
     const res = await runStageProcess('git', args, { timeoutMs: GH_TIMEOUT, ...NO_SHELL });
     if (!res.ok) throw new Error(`git ${args.join(' ')} failed: ${res.output.slice(0, 500)}`);
+  }
+
+  /** `git`, returning trimmed stdout — for a command whose ANSWER is the point. */
+  private async gitCapture(args: readonly string[]): Promise<string> {
+    const res = await runStageProcess('git', args, { timeoutMs: GH_TIMEOUT, ...NO_SHELL });
+    if (!res.ok) throw new Error(`git ${args.join(' ')} failed: ${res.output.slice(0, 500)}`);
+    return res.stdout.trim();
   }
 }
 

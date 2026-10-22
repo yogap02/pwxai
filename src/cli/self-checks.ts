@@ -339,6 +339,44 @@ check('a spec imports the page-object class its generated blocks instantiate', a
   );
 });
 
+check('a private member is not a capability the spec can call', async () => {
+  // The classifier is handed every extracted member and told to use ONLY those, so a private
+  // helper in the list is an instruction to call something a spec legally cannot. It happened:
+  // the gallery page object's `expectGridSettled` (a wait, not an assertion) was offered, the
+  // classifier answered with it, and stage 2 wrote a block calling it. The compile guard caught
+  // the block — TS2341 — which is the backstop working, but the gate should never have offered
+  // it. The landing page never tripped this only because nothing generated reached for one of
+  // its privates; a second domain found it immediately.
+  const surface = await extractPomSurface('src/page-objects/gallery/index.ts');
+  for (const priv of ['loc', 'byCopy', 'expectGridSettled', 'grid', 'cards']) {
+    assert(!surface.methods.has(priv), `a private member must not be offered as a capability: ${priv}`);
+  }
+  for (const pub of ['goto', 'expectHeading', 'filterByCategory', 'search', 'openLightbox']) {
+    assert(surface.methods.has(pub), `a public member must still be offered: ${pub}`);
+  }
+  // Getters are read by the spec, so a public one stays; `heading` is public and asserted on.
+  assert(surface.properties.has('heading'), 'a public getter stays part of the surface');
+
+  // And the same over every page object in the repo, so the next one cannot reintroduce it.
+  const poms = await listRepoFiles('src/page-objects', (f) => f.endsWith('.ts'));
+  const leaked: string[] = [];
+  for (const pom of poms) {
+    const s = await extractPomSurface(pom);
+    const src = await readFile(rehydrate(pom), 'utf8');
+    for (const member of [...s.methods, ...s.properties]) {
+      const decl = new RegExp(
+        `^\\s*(?:private|protected)\\s+(?:async\\s+)?(?:get\\s+)?${member}\\b`,
+        'm',
+      );
+      if (decl.test(src)) leaked.push(`${pom}: ${member}`);
+    }
+  }
+  assert(
+    leaked.length === 0,
+    `private members reached the capability surface: ${leaked.join(', ')}`,
+  );
+});
+
 check('the generator is given member signatures, so a call can supply its arguments', async () => {
   // The capability list was names only, so `expectHeroCtaTargets(href: string)`
   // read like a zero-argument assertion; a generated block called it with none and
@@ -998,6 +1036,29 @@ check('a block that reaches past the page object is refused, never written', asy
   const digest = stripComments(await readFile(rehydrate('src/stages/02-testcase-digest.ts'), 'utf8'));
   assert(/blockViolations\(gen\.code\)/.test(digest), 'stage 2 must refuse such a block before writing it');
   assert(/verdict|record\(/.test(digest), 'the refusal must be recorded as a verdict, not swallowed');
+});
+
+check('the delivery branch is created at HEAD, never by checking the tree back to the base', async () => {
+  // `git checkout -B <name> origin/<base>` is destructive whenever HEAD is not already the base,
+  // and that is every LOCAL run: the pipeline is run from the branch a developer is working on.
+  // Measured in a throwaway worktree with HEAD three commits ahead of origin/main — the checkout
+  // moved the tree back to origin/main and every file those commits added vanished from the
+  // working directory. In CI HEAD IS origin/<base>, so the bug is invisible exactly where it is
+  // hardest to notice, and the local symptom ("local changes would be overwritten") reads like a
+  // dirty tree rather than a delivery bug.
+  const src = stripComments(await readFile(rehydrate('src/delivery/github.ts'), 'utf8'));
+  const checkout = /git\(\['checkout', '-B', name[^\]]*\]\)/.exec(src);
+  assert(checkout !== null, 'createBranch must still create the branch');
+  assert(
+    !/origin\/\$\{fromBranch\}`/.test(checkout![0]),
+    'createBranch must not check the working tree out to origin/<base> — it discards committed work',
+  );
+  // And the divergence it can still produce has to reach the report.
+  const stage = stripComments(await readFile(rehydrate('src/stages/08-git.ts'), 'utf8'));
+  assert(
+    /baseDivergence/.test(stage) && /recordDegradation\('git'/.test(stage),
+    'a branch based on HEAD rather than the base must be recorded, not silently shipped',
+  );
 });
 
 check('generated output is gated before it ships, not only before it is generated', async () => {
