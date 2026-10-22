@@ -146,6 +146,84 @@ export function buildReportMessage(manifest: RunManifest, opts: ReportOptions = 
   return html.length <= TELEGRAM_LIMIT ? html : fitTelegram(markdown);
 }
 
+export interface AbortOptions extends ReportOptions {
+  /** The stage that stopped the run. */
+  stage: string;
+  /** Its output, already redacted by the caller if it came from a child process. */
+  output: string;
+}
+
+/**
+ * The message for a run that DIED, and it is a different message on purpose.
+ *
+ * Stage 9 is the last stage, so a run that aborts at stage 1 or 2 never reaches it: the chat
+ * would stay silent on exactly the runs where something went wrong. Worse, the only other
+ * channel is a comment on the product's PR — the one path that needs a permission nobody has
+ * verified — so a 403 there means nobody in either repo is told.
+ *
+ * It is NOT the normal report with a different colour. A run that died has no scope, no
+ * result and no coverage, so printing those sections would print three lines of "nothing"
+ * under a report shape a reader has learned to scan. What a reader needs instead is the one
+ * thing they cannot guess: the run stopped early, here is the stage, here is why, and here is
+ * what therefore did not happen. The tail of the output is the only evidence of the cause
+ * that exists, so it is included — trimmed and redacted, because it is model and process text.
+ */
+export function buildAbortMessage(manifest: RunManifest, opts: AbortOptions): string {
+  const markdown = abortMarkdown(manifest, opts);
+  const html = markdownToHtml(markdown);
+  return html.length <= TELEGRAM_LIMIT ? html : fitTelegram(markdown);
+}
+
+function abortMarkdown(manifest: RunManifest, opts: AbortOptions): string {
+  const out: string[] = [
+    `**Pipeline run \`${manifest.runId}\` stopped early**`,
+    '',
+    // The same two labels the finished report uses, so the shape a reader has learned still
+    // holds: the process is red, and the product was never asked.
+    `**Testing Status:** ${statusEmoji('none')} no test run was recorded — the run stopped first`,
+    `**Pipeline Status:** ${statusEmoji('failed')} stage \`${opts.stage}\` failed`,
+    '',
+  ];
+
+  const repo = opts.sourceRepo === undefined ? '' : `\`${opts.sourceRepo}\` `;
+  out.push(
+    manifest.sourcePR === null
+      ? `**Source:** ${repo}${manifest.branch === null ? 'no PR context' : `branch \`${manifest.branch}\``}`
+      : `**Source:** ${repo}PR #${manifest.sourcePR}`,
+    '',
+  );
+
+  // Named explicitly: a reader who assumes the later stages ran will read silence as a pass.
+  out.push(
+    '**What did not happen**',
+    `- the run stopped at \`${opts.stage}\`, so every later stage was never reached`,
+    '- no tests ran, no scope was decided, and nothing was delivered or opened for review',
+    '',
+  );
+
+  const tail = abortTail(opts.output);
+  if (tail.length > 0) {
+    out.push('**Why**', '```', ...tail, '```', '');
+  }
+
+  return out.join('\n').trimEnd();
+}
+
+/**
+ * The last few meaningful lines of a stage's output.
+ *
+ * The tail, not the head: a failing stage's own error is the last thing it said, and the head
+ * is usually the prompt or the setup. Bounded hard, because this lands in a chat and the whole
+ * point is that a person can read it on a phone.
+ */
+function abortTail(output: string, maxLines = 12): string[] {
+  const lines = output
+    .split('\n')
+    .map((l) => l.replace(/\s+$/, ''))
+    .filter((l) => l.trim().length > 0);
+  return lines.slice(-maxLines).map((l) => redact(l.slice(0, 300)));
+}
+
 /**
  * Cut a report that is too long to send, and say so.
  *
@@ -289,13 +367,22 @@ function playwrightTotals(
  * `&amp;` there too.
  */
 export function markdownToHtml(markdown: string): string {
-  return markdown
+  // Escape FIRST, everything else after: the escaped text is what gets wrapped, so no value
+  // can inject a tag by being interpolated into one.
+  const escaped = markdown
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/`([^`\n]+)`/g, '<code>$1</code>')
-    .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>')
-    .replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, '<a href="$2">$1</a>');
+    .replace(/>/g, '&gt;');
+  return (
+    escaped
+      // Fenced blocks before inline code: Telegram HTML has no fence syntax, so a ``` tail
+      // would arrive as three literal backticks. An abort message carries a stage's raw output,
+      // and that is the one place a reader needs to trust the text is exact and preformatted.
+      .replace(/^```\n([\s\S]*?)\n```$/gm, (_whole, body: string) => `<pre>${body}</pre>`)
+      .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+      .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>')
+      .replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, '<a href="$2">$1</a>')
+  );
 }
 
 export interface SendOutcome {

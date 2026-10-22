@@ -49,6 +49,7 @@ import { findLayoutSpill, type LayoutBox } from '../runtime/viewport.js';
 import { redact } from '../core/util/redaction.js';
 import { env } from '../core/util/env.js';
 import {
+  buildAbortMessage,
   buildReportMessage,
   runStatus,
   sendReportMessage,
@@ -2510,6 +2511,53 @@ check('the report channel carries the result and the scope, so a narrowed run ca
   const big = buildReportMessage(many, {});
   assert(big.length <= 4096, `the report must fit one Telegram message, got ${big.length}`);
   assert(big.includes('truncated'), 'a report that was cut must say it was cut');
+
+  // A run that DIES at stage 1 or 2 never reaches stage 9, so the abort sends its own message.
+  // It must not be the finished report with a different colour: a run that died has no scope,
+  // no result and no coverage, and printing those three sections as "nothing" teaches a reader
+  // to scan a shape whose lines mean the opposite of what they say.
+  const dead = newManifest('check-abort');
+  const abortMsg = buildAbortMessage(dead, {
+    stage: 'gap-analysis',
+    output: 'fetching the diff\ngh pr diff: HTTP 404 Not Found',
+    sourceRepo: 'yogap02/fotogaper',
+  });
+  assert(abortMsg.includes('stopped early'), 'the message must say the run stopped, not that it finished');
+  assert(
+    abortMsg.includes('stage <code>gap-analysis</code> failed'),
+    'the stage that stopped it must be named — that is the one fact a reader cannot guess',
+  );
+  assert(
+    abortMsg.includes('What did not happen') && abortMsg.includes('no tests ran'),
+    'a reader who assumes the later stages ran will read silence as a pass, so the message must say what did not happen',
+  );
+  assert(
+    abortMsg.includes('HTTP 404'),
+    'the tail of the failing stage is the only evidence of the cause, so it must be carried',
+  );
+  assert(
+    !abortMsg.includes('<b>Scope</b>') && !abortMsg.includes('<b>Coverage</b>'),
+    'the finished report’s sections must not be printed empty — an aborted run has no scope or coverage to report',
+  );
+  assert(
+    abortMsg.includes('<pre>') && !abortMsg.includes('```'),
+    'the stage output must arrive preformatted — Telegram HTML has no fences, so ``` would render as literal backticks',
+  );
+  assert(
+    abortMsg.includes('<b>Testing Status:</b> ⚠️') && abortMsg.includes('<b>Pipeline Status:</b> ❌'),
+    'the same two labels, so the shape a reader has learned still holds: the process is red and the product was never asked',
+  );
+  assert(
+    abortMsg.length <= 4096,
+    `an abort message must fit one Telegram message, got ${abortMsg.length}`,
+  );
+  // It carries child-process and model text, which is exactly where a token or URL can hide.
+  const leaky = newManifest('check-abort-redact');
+  const leaked = buildAbortMessage(leaky, {
+    stage: 'gap-analysis',
+    output: `fatal: https://api.telegram.org/bot${'123456:'.concat('A'.repeat(35))}/sendMessage`,
+  });
+  assert(!leaked.includes('A'.repeat(35)), 'the abort tail must be redacted like any other output');
 
   // The verdict is the one thing the two readers must agree on, and a run that recorded no
   // browser result is `attention`: a green tick for "nothing was verified" is the lie the
