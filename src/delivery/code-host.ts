@@ -36,6 +36,12 @@ export interface CodeHost {
   fetchSource(prNumber: number): Promise<SourceIssue>;
   /** Stage 8: branch, commit, push, PR. */
   createBranch(name: string, fromBranch: string): Promise<void>;
+  /**
+   * Set by `createBranch` when the delivery branch was based on the working tree's HEAD rather
+   * than `origin/<fromBranch>` — a local run from a feature branch. Stage 8 records it so the PR
+   * diff's extra commits are explained rather than surprising. `null` when the base was HEAD.
+   */
+  readonly baseDivergence?: string | null;
   commitAll(message: string): Promise<void>;
   push(branch: string): Promise<void>;
   openPr(input: PrCreateInput): Promise<PrRef>;

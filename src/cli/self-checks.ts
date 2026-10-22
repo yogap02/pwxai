@@ -1038,6 +1038,29 @@ check('a block that reaches past the page object is refused, never written', asy
   assert(/verdict|record\(/.test(digest), 'the refusal must be recorded as a verdict, not swallowed');
 });
 
+check('the delivery branch is created at HEAD, never by checking the tree back to the base', async () => {
+  // `git checkout -B <name> origin/<base>` is destructive whenever HEAD is not already the base,
+  // and that is every LOCAL run: the pipeline is run from the branch a developer is working on.
+  // Measured in a throwaway worktree with HEAD three commits ahead of origin/main — the checkout
+  // moved the tree back to origin/main and every file those commits added vanished from the
+  // working directory. In CI HEAD IS origin/<base>, so the bug is invisible exactly where it is
+  // hardest to notice, and the local symptom ("local changes would be overwritten") reads like a
+  // dirty tree rather than a delivery bug.
+  const src = stripComments(await readFile(rehydrate('src/delivery/github.ts'), 'utf8'));
+  const checkout = /git\(\['checkout', '-B', name[^\]]*\]\)/.exec(src);
+  assert(checkout !== null, 'createBranch must still create the branch');
+  assert(
+    !/origin\/\$\{fromBranch\}`/.test(checkout![0]),
+    'createBranch must not check the working tree out to origin/<base> — it discards committed work',
+  );
+  // And the divergence it can still produce has to reach the report.
+  const stage = stripComments(await readFile(rehydrate('src/stages/08-git.ts'), 'utf8'));
+  assert(
+    /baseDivergence/.test(stage) && /recordDegradation\('git'/.test(stage),
+    'a branch based on HEAD rather than the base must be recorded, not silently shipped',
+  );
+});
+
 check('generated output is gated before it ships, not only before it is generated', async () => {
   // CI runs `typecheck && self-checks` immediately BEFORE `npm run pipeline`, so the code
   // the pipeline writes has never been through them. The failure is not subtle once you see

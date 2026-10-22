@@ -47,6 +47,13 @@ export function createGitStage(codeHost: CodeHost): StageSpec {
       }
 
       await codeHost.createBranch(branchName, baseBranch);
+      // Stated, not discovered in the diff: a local run branches from HEAD, so the PR carries the
+      // branch's own commits alongside the generated tests. Shipping is still right; pretending
+      // the diff is one commit is not.
+      const divergence = codeHost.baseDivergence;
+      if (typeof divergence === 'string' && divergence.length > 0) {
+        ctx.recordDegradation('git', divergence);
+      }
       await codeHost.commitAll(`test(pipeline): generated tests + healed locators\n\nRun: ${ctx.manifest.runId}`);
       await codeHost.push(branchName);
       const ref = await codeHost.openPr({
