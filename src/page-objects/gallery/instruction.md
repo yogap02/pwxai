@@ -140,3 +140,7 @@ back link; no horizontal overflow at a mobile width.
 Not worth it: anything about the three defects above, the exact copy of the
 intro line, the CDN URLs, or the number of proofs — that is content, and it
 changes when the photographer uploads a photo.
+
+## What the stub builder observed
+- Entry page: https://foto.gappp.my.id/en/portfolio
+- Page title: Portfolio | fotogaper | fotogaper
