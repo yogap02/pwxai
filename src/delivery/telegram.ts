@@ -272,7 +272,7 @@ function reportMarkdown(manifest: RunManifest, opts: ReportOptions): string {
     '',
   );
 
-  out.push('**Scope**', ...humanScope(manifest), '');
+  out.push('**Scope**', ...planLines(manifest), ...scopeFacts(manifest), '');
 
   out.push('**Result**', ...resultLines(manifest), '');
 
@@ -294,11 +294,58 @@ function reportMarkdown(manifest: RunManifest, opts: ReportOptions): string {
   return out.join('\n').trimEnd();
 }
 
-/** The summary's own scope lines, or a plain statement that no scope was decided. */
-function humanScope(manifest: RunManifest): string[] {
+/** The summary's own scope lines. Silent when the plan line above already said it all. */
+function scopeFacts(manifest: RunManifest): string[] {
   const lines = scopeCoverageLines(manifest);
-  if (lines.length === 0) return ['- no scope recorded (stage 5 did not reach a decision)'];
+  // `planLines` has already stated the decision when stage 5 recorded one, and the only way
+  // `scopeCoverageLines` is empty is that there are no domains — which on a planned run means
+  // there was nothing to scope. Printing "no scope recorded" under a line that just named the
+  // scope contradicts it, so the fallback is only for a run that really decided nothing.
+  if (lines.length === 0) {
+    return manifest.plan === null
+      ? ['- no scope recorded (stage 5 did not reach a decision)']
+      : [];
+  }
   return lines;
+}
+
+/**
+ * The plan, stated as the decision it was — "Sanity testing of PR #2", and who decided it.
+ *
+ * The tier name alone is not the plan. `smoke` reads identically whether the agent judged the
+ * critical paths sufficient or a fallback widened the run to here, so the line names the
+ * source and, when an agent chose, quotes the agent's own reason. That is the difference
+ * between a report that states a scope and one that states a judgement.
+ */
+function planLines(manifest: RunManifest): string[] {
+  const plan = manifest.plan;
+  if (plan === null) {
+    return ['- no scope was decided — stage 5 did not reach a decision'];
+  }
+  const target = manifest.sourcePR === null ? '' : ` of PR #${manifest.sourcePR}`;
+  const headline =
+    plan.source === 'human'
+      ? `**Human override** — \`${plan.tier}\` testing${target}`
+      : `**${titleCase(plan.tier)} testing${target}**`;
+  const who =
+    plan.source === 'planner'
+      ? ' — chosen by the test-plan agent'
+      : plan.source === 'fail-open'
+        ? ' — widened by a fallback, not chosen'
+        : ' — supplied by a human, the agent was not consulted';
+  // A planned scope is not a run scope. Naming "Regression testing" for a run that stopped
+  // before stage 6 would describe tests that never happened, in the present tense, in the one
+  // section a reader scans to learn what was tested.
+  const ran = playwrightTotals(manifest) !== null;
+  const out = [`- ${headline}${who}${ran ? '' : ' — **but nothing ran at this scope**'}`];
+  if (plan.source === 'planner' && plan.reason.length > 0) {
+    out.push(`  - because: ${plan.reason}`);
+  }
+  return out;
+}
+
+function titleCase(tier: string): string {
+  return tier.length === 0 ? tier : tier[0]!.toUpperCase() + tier.slice(1);
 }
 
 function resultLines(manifest: RunManifest): string[] {

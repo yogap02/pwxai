@@ -89,6 +89,21 @@ export interface RunManifest {
    */
   grepOverride: string | null;
   /**
+   * Stage 5's decision, kept as data: which tier was planned, WHY the agent chose it, and
+   * whether an agent chose it at all.
+   *
+   * `tier` alone cannot be reported honestly. The same word `smoke` means "the agent read this
+   * change and judged the critical paths sufficient" or "a fallback widened it here", and a
+   * report that prints one without the other attributes a decision to the agent that it never
+   * made. The reason is the agent's own sentence, so the reader sees the judgement rather than
+   * just its label.
+   */
+  plan: {
+    tier: string;
+    reason: string;
+    source: 'planner' | 'human' | 'fail-open';
+  } | null;
+  /**
    * Stage 8's outcome: the PR it opened for review, or the fact that there was nothing to
    * ship. Persisted because the report channel links to it — a PR reference parsed back out
    * of a stage's prose output breaks the moment that wording changes.
@@ -121,6 +136,7 @@ export function newManifest(runId: string): RunManifest {
     scenarios: [],
     domains: [],
     grepOverride: null,
+    plan: null,
     delivery: null,
     stages: [],
   };
@@ -180,6 +196,19 @@ export async function loadManifest(): Promise<RunManifest> {
       healApply: d.healApply ?? null,
     })),
     grepOverride: raw.grepOverride ?? null,
+    // Validated, not trusted: an unrecognised `source` would make the report claim the agent
+    // chose a scope it did not, which is the misattribution this field exists to prevent.
+    plan:
+      raw.plan !== null &&
+      raw.plan !== undefined &&
+      typeof raw.plan.tier === 'string' &&
+      (raw.plan.source === 'planner' || raw.plan.source === 'human' || raw.plan.source === 'fail-open')
+        ? {
+            tier: raw.plan.tier,
+            reason: typeof raw.plan.reason === 'string' ? raw.plan.reason : '',
+            source: raw.plan.source,
+          }
+        : null,
     delivery: raw.delivery ?? null,
     stages: raw.stages ?? [],
   };

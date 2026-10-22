@@ -2465,6 +2465,17 @@ check('the report channel carries the result and the scope, so a narrowed run ca
     msg.includes('<code>smoke</code> scope'),
     'a narrowed run must name its scope in the headline, where the tick is',
   );
+  // The plan, as a decision: what scope, and who decided it. `smoke` reads identically
+  // whether the agent judged the critical paths sufficient or a fallback widened the run
+  // here, so the source and the agent's own reason have to be in the message.
+  assert(
+    msg.includes('<b>Smoke testing of PR #7</b>') && msg.includes('chosen by the test-plan agent'),
+    'the report must state the scope the agent planned, and that the agent planned it',
+  );
+  assert(
+    msg.includes('because: The change is a copy edit in the hero'),
+    'and the agent’s own reason for it — a tier name alone is not a judgement',
+  );
   assert(
     msg.includes('Not a verdict on the whole suite'),
     'a tick on a narrowed run must be qualified next to itself — a scope line further down is what a reader believes after they have already believed the tick',
@@ -2479,6 +2490,25 @@ check('the report channel carries the result and the scope, so a narrowed run ca
   assert(
     !wholeMsg.includes('Not a verdict') && !wholeMsg.includes('scope only'),
     'a run of the whole suite is a verdict on the suite, and must not say otherwise',
+  );
+
+  // A fallback that widened the run is NOT the agent's judgement, and saying so would put a
+  // decision in the agent's mouth that it never made — the exact misattribution the persisted
+  // `source` exists to prevent.
+  const widened = sampleManifest('check-widened');
+  widened.plan = { tier: 'regression', reason: 'planner agent produced no usable scope', source: 'fail-open' };
+  const widenedMsg = buildReportMessage(widened, {});
+  assert(
+    widenedMsg.includes('widened by a fallback, not chosen'),
+    'a widened run must say it was widened — the same tier name must not read as a choice',
+  );
+  assert(
+    !widenedMsg.includes('chosen by the test-plan agent'),
+    'a fallback must never be reported as the agent’s decision',
+  );
+  assert(
+    !widenedMsg.includes('because:'),
+    'and there is no agent reason to quote for a scope the agent did not choose',
   );
 
   // A scenario title is arbitrary text, so it must not be able to close a tag or open one.
@@ -2787,6 +2817,14 @@ function sampleManifest(runId: string): RunManifest {
       healApply: 'skipped',
     },
   ];
+  // Stage 5's decision, as stage 5 records it. The tier alone cannot say whether the agent
+  // chose this scope or a fallback widened it here, and the report must not attribute a
+  // judgement to the agent that it never made.
+  m.plan = {
+    tier: 'smoke',
+    reason: 'The change is a copy edit in the hero, so the critical paths are enough.',
+    source: 'planner',
+  };
   return m;
 }
 

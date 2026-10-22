@@ -117,6 +117,14 @@ export function createTestPlanStage(model: ModelClient): StageSpec {
         d.tier = outcome.tier;
         d.grep = outcome.grep;
       }
+      // The decision itself, as data: the report channel states the scope the agent chose AND
+      // the agent's own reason for it, and neither can be recovered from the tier name. On an
+      // override there is no agent sentence to quote, and `source: 'human'` says so.
+      ctx.manifest.plan = {
+        tier: outcome.tier ?? override ?? '(full suite)',
+        reason: proposalReason,
+        source: outcome.source,
+      };
 
       const lines = [
         outcome.source === 'human'
