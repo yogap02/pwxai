@@ -201,6 +201,69 @@
 >
 > Still untouched, and the one thing left: the run's own report. The retry overwriting the digest's
 > verdicts still makes "nothing was generated" reachable for a run that generated.
+>
+> **Addition (2026-10-21, fifth pass): stage 9, the report channel.** A run's result reached only the
+> Actions tab and the PR body. Stage 9 `notify` posts it to a Telegram chat (`TELEGRAM_API_KEY` /
+> `TELEGRAM_CHAT_ID`), reusing the summary's own `scopeCoverageLines` so the message and the summary
+> cannot disagree — `6 passed` on a phone, with no scope attached, is the same smaller green in another
+> medium. The channel is `fatal: false` but never quiet: a send that failed **fails the stage**, because
+> returning a string would report a *succeeded* stage for a report nobody received; no channel
+> configured is the opposite case and is the stage's output, not a defect. The token appears nowhere
+> but the request, and a transport failure reports the error's *name*, not its message, which can carry
+> the URL.
+>
+> **Addition (2026-10-21, sixth pass): two statuses, and a report that survives a dead run.** One
+> verdict for "the suite went red" and "the pipeline broke" sent people to fix the wrong one, so
+> `Testing Status` (the product) and `Pipeline Status` (the process) are printed as two labelled lines
+> and never folded. The same conflation had to come out at its source: stage 6 recorded *every*
+> nonzero exit as a degradation, and a failing test is the ordinary reason Playwright exits 1, so a red
+> suite turned the process status yellow too — it now records that only when the recorded failures do
+> not explain the exit.
+>
+> Then stage 9's position became the bug: it is the LAST stage, so a run that aborted at stage 1 or 2
+> never reached it, and the chat was silent on exactly the runs where something went wrong. The only
+> other channel was a comment on the product's PR, whose failure a `catch { /* best-effort */ }`
+> swallowed. `abortRun` now persists, comments, reports and exits, with its own message template — a
+> run that died has no scope, no result and no coverage, so printing those sections would print three
+> lines of "nothing" under a shape a reader has learned to scan. A planned scope also stopped claiming
+> to be a run scope: a run that stopped before stage 6 says so instead of describing tests that never
+> happened.
+>
+> **Addition (2026-10-22): the source repo and the work repo are two things, and were one.**
+> `WORK_REPO_SLUG` is where the pipeline *writes*; the product CICD triggers this pipeline after its
+> own deploy, so the PR stage 1 reads lives in the **source** repo while everything written stays in
+> the **work** repo. One slug could not serve both — reading the change with the work slug looked for
+> PR #N in the wrong repository, failing or reading a number that exists in both and testing the wrong
+> change. Hence `SOURCE_REPO_SLUG` (optional; absent means the single-repo case), read only by
+> `fetchSource`, and `deliveryBaseBranch()` for the base. The workflow became `workflow_dispatch`-only
+> for the same reason: stage 8 *opens* a PR here, so a `pull_request` trigger is a loop.
+>
+> **Addition (2026-10-22): a second domain, and three bugs a single domain had hidden.** The gallery
+> (`/en/portfolio`) was added as a second feature area — 12 scenarios, 12 generated tests — and it
+> immediately found what one domain could not:
+>
+> - `extractPomSurface` published `private` members as capabilities, so the classifier answered with a
+>   private `expectGridSettled` and stage 2 wrote a block calling it (TS2341). Private and protected
+>   members are excluded now, and a self-check asserts it over every page object.
+> - `createBranch` ran `git checkout -B <name> origin/<base>`, which is destructive whenever HEAD is
+>   not the base — every local run. Measured in a throwaway worktree with HEAD three commits ahead of
+>   `origin/main`: the checkout moved the tree back and every file those commits added vanished. In CI
+>   HEAD *is* the base, so the bug was invisible exactly where it is hardest to notice. The branch is
+>   created at HEAD and the divergence is recorded as a degradation.
+> - A CI-only change made the planner choose `regression` and report the product's pre-existing reds as
+>   this run's news. A change touching no product behaviour is a **deployment check**, and the prompt
+>   now names that shape.
+>
+> The report also stopped stating a tier and started stating a decision: `manifest.plan` carries the
+> tier, the agent's own reason and `source`, so a reader can tell a judgement from a fallback — and a
+> `fail-open` widening quotes no reason rather than putting one in the agent's mouth.
+>
+> **Addition (2026-10-22, last): the deck.** `deck/build-deck.py` renders the workshop deck from the
+> same facts as this file, with `deck/diagrams/d1–d5.png` rendered straight out of `WORKFLOW.md`
+> (`node deck/render-mermaid.mjs`). The deck's style rule is now part of the build: short lines
+> and a highlighted lead on every *point* rather than on the heading, so fewer words buy a larger body
+> size. `deck/fit-deck.py` measures every text frame with real font metrics, because PowerPoint
+> grows a textbox silently and an overflow only shows up when someone opens the file.
 
 ## Context
 
@@ -234,7 +297,7 @@ and leaves product vocabulary as clearly-marked product-owned files.
 
 ## Stack
 
-- Node 20+, TypeScript (strict), ESM.
+- Node 24+ (the CI pin; Node 20 is EOL), TypeScript (strict), ESM.
 - `@playwright/test` **1.63.0** (latest) + `playwright-core` (for CDP stub).
 - `openai` (AI layer), `zod` (schema/JSON validation), `p-limit` (bounded pool), `dotenv` (env).
 - No runtime vendored deps beyond the above; keep it lean.
@@ -288,10 +351,12 @@ tcgen/
       06-playwright-test.ts
       07-heal-apply.ts
       08-git.ts
+      09-notify.ts
     delivery/
       code-host.ts                        # CodeHost interface
-      issue-tracker.ts                    # IssueTracker interface
       github.ts                           # gh CLI impl (PR read, branch, push, PR open, comment)
+      pr-body.ts                          # the PR body: scope, verdicts, blocked scenarios
+      telegram.ts                         # the report channel: result, scope, abort message
     exploration/
       crawler.ts                          # BFS crawler (breadth only, not targeted build)
       page-analyser.ts, journal.ts, locator-writer.ts
@@ -332,7 +397,7 @@ checklist, updating it as milestones complete.
 |---|---|---|
 | S1 | PLAN.md in repo, package.json, tsconfig, playwright.config.ts, .env.example, .gitignore, README, `core/util` (paths, env, pool), directory tree with `.gitkeep` | `npx tsc --noEmit` clean |
 | S2 | `core/scenario` (parser → manifest → managed-region → domain-map), `config/domain-map.json` + `scenarios/` seed | parser/manifest unit checks in self-checks |
-| S3 | `core/orchestration` (run-report → stage-runner), stages 01–08 as wired skeletons | dry-run of a mock stage sequence writes a report |
+| S3 | `core/orchestration` (run-report → stage-runner), stages 01–09 as wired skeletons | dry-run of a mock stage sequence writes a report |
 | S4 | `ai/` model-client + prompts + capability-index + classifier + generator + backstop; stages 1–2 real | self-checks + a mocked-model dry run |
 | S5 | `runtime/` self-heal fixture + manifest + writer; `planning/` tiers + planner; stage 5–7 real | `npm test` with a sample spec + heal fixture — **the heal fixture half was not met until 2026-10-19** (nothing imported it). Now: break a string-addressed locator, watch the test pass on a narrowed selector, `heals.json` records one heal, `stage:7` rewrites the source, next run clean. The record also carries the outcome of the test that used it, and only a repair with a passing test behind it is folded in — a repair whose test failed is declined and named (2026-10-19). |
 | S6 | `agent/` interface + cdp stub + write-scope guard; `delivery/` github impl; `exploration/` crawler | `npm run pipeline -- --dry-run` full loop |
@@ -352,7 +417,7 @@ a session by updating the session checklist in `PLAN.md`.
 6. `agent/` interface + cdp stub + write-scope guard.
 7. `delivery/` interfaces + github impl.
 8. `exploration/` crawler + analyser + journal + locator-writer.
-9. `stages/` 01–08 wired through the runner.
+9. `stages/` 01–09 wired through the runner.
 10. `cli/` run-pipeline + self-checks; `config/` + `scenarios/` seeds; CI workflow.
 
 ## Verification

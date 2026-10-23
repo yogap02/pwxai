@@ -17,7 +17,7 @@ npm ci
 cp .env.example .env            # Windows: copy .env.example .env — then fill it in
 npx playwright install chromium # needed for local npm test / stage-3 builder
 npm run typecheck               # tsc --noEmit, strict — the only static gate
-npm run self-checks             # plain-assertion invariants (85 today), no browser, seconds
+npm run self-checks             # plain-assertion invariants (89 today), no browser, seconds
 npm test                        # playwright; needs a live BASE_URL
 npm run test:list               # enumerate specs without running
 npm run pipeline -- --pr 123    # full 9 stages against PR #123
@@ -55,7 +55,8 @@ gh workflow run test-pipeline -f from_scenarios=true   # start a run by hand, no
 - `verbatimModuleSyntax` + `isolatedModules`: use `import type` for type-only imports.
 - `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes` are on — index access yields
   `T | undefined`; do not add `?`-optional props that may be explicitly `undefined`.
-- Node >= 20 required.
+- Node >= 24 required (CI pins 24, the current Active LTS; Node 20 is EOL and receives no
+  security releases).
 - `runStageProcess` spawns through a shell on Windows (so PATH finds `.cmd` shims like `npx`). A
   shell re-parses the arguments, so any runtime-built argument containing `|` becomes a pipe:
   a Playwright grep like `@core|@smoke|Some title` kills the run with exit 255. Pass
@@ -146,6 +147,25 @@ gh workflow run test-pipeline -f from_scenarios=true   # start a run by hand, no
   carry the URL. It runs last because it reports what stage 8 delivered, and it is reachable as
   `npm run stage:9`: re-sending a report is a real operation, and it reuses the manifest on disk
   instead of re-running a suite.
+- **A run that dies still reports, so the notification is not downstream of the failure.** Stage 9 is
+  the *last* stage, so an abort at stage 1 or 2 never reached it — the chat was silent on exactly the
+  runs where something went wrong, and the only other channel was a comment on the product's PR, the
+  one path that needs a permission nobody has verified. `abortRun` (`src/cli/run-pipeline.ts`)
+  persists, comments, reports, exits, in that order. The abort message is its own template, never the
+  normal report in another colour: a run that died has no scope, no result and no coverage, so those
+  sections would print three lines of "nothing" under a shape a reader has learned to scan. It carries
+  the two labels, then **what did not happen**, then the tail of the stage output — the tail, because a
+  failing stage's own error is the last thing it said. A comment-back failure returns a reason instead
+  of being swallowed by `catch { /* best-effort */ }`, because a 403 there meant nobody in either repo
+  was told and no record said so.
+- **A report states the plan, and who chose it.** `manifest.plan` carries the tier, the agent's own
+  reason and `source` (`planner` / `human` / `fail-open`), and the report renders it as a sentence —
+  `Smoke testing of PR #2 — chosen by the test-plan agent`, then the reason. `tier: smoke` alone reads
+  identically whether the agent judged the critical paths sufficient or a fallback widened the run
+  here, so a reader cannot tell a judgement from a default. A `fail-open` widening prints "widened by
+  a fallback, not chosen" and quotes no reason: there is no agent sentence to quote, and reporting one
+  would put a decision in the agent's mouth that it never made. A *planned* scope is also not a run
+  scope — a run that stopped before stage 6 says so rather than describing tests that never happened.
 - **A report carries two statuses, because a failed test and a broken pipeline are different
   problems.** `Testing Status` is the product — what the browser run found; `Pipeline Status` is the
   process — whether the run did its job. They are printed as two labelled lines and never folded
@@ -257,6 +277,22 @@ gh workflow run test-pipeline -f from_scenarios=true   # start a run by hand, no
   names the gap so stage 4 has a work order, the prompt asks for the missing assertion by name, and
   the decision is pure and driven by synthetic answers in self-checks — the easy thing to get wrong is
   the emptiness of a list.
+- **A private member is not a capability.** `extractPomSurface` (`src/ai/capability-index.ts`) excludes
+  `private` and `protected` members from methods, properties and locators. The classifier is handed
+  every extracted name and told to use ONLY those, so publishing `private async loc(` was an
+  instruction to call something a spec legally cannot: the gallery domain answered with a private
+  `expectGridSettled` and stage 2 wrote a block calling it (TS2341, caught by the compile guard — the
+  backstop working, but the gate should never have offered the name). A self-check asserts it over
+  every page object in the repo, so a new domain cannot reintroduce it. A refused block also records
+  the compiler code that failed it, because "TS1005: ';' expected" with no source is unactionable.
+- **The delivery branch is created at HEAD, never by checking the tree back to the base.**
+  `git checkout -B <name> origin/<base>` is destructive whenever HEAD is not already the base — which
+  is every LOCAL run, since the pipeline is run from the branch a developer is on. Measured: with HEAD
+  three commits ahead of `origin/main`, the checkout moved the tree back and every file those commits
+  added vanished from the working directory. In CI HEAD *is* `origin/<base>`, so the bug is invisible
+  exactly where it is hardest to notice, and the local symptom ("local changes would be overwritten")
+  reads like a dirty tree rather than a delivery bug. `createBranch` keeps HEAD and stage 8 records the
+  divergence (`baseDivergence`) as a degradation, so a PR carrying extra commits explains itself.
 - **The manifest round-trips, and holds no `Map`**: a `Map` handed to `JSON.stringify` becomes `{}`
   with no error, so one left in the manifest silently empties the digest. The manifest therefore
   stores plain arrays/objects only — `scenarios[]` rows carry `verdict` + `reason` — and a
@@ -481,9 +517,13 @@ These are meant to be filled per product, not "fixed":
 - `--dry-run` skips only stages 6 (playwright) and 8 (git); stages 2/3 still hit the model and the
   browser, and stage 5 still asks the planner agent, so it is not an offline run.
 - `npm test` needs a live app at `BASE_URL` plus installed chromium; the default
-  `http://localhost:3000` is logged loudly when unset.
-- `scenarios/demo.txt`, `tests/demo/`, and the empty `src/page-objects/` are
-  seeds. Delete the demo before adopting (README §"Adopting this boilerplate").
+  `http://localhost:3000` is logged loudly when unset. The suite is 24 tests across 2 domains, and
+  one of them is **expected red** against the current product: the landing page's mobile test fails
+  on `expectTurnstileFitsForm` (slot 276px against the declared 300px widget), which is a real
+  defect the suite found, not a broken test. 23 passed, 1 failed is the healthy local state.
+- `scenarios/landing-page.txt` + `scenarios/gallery.txt`, `tests/landing-page/` +
+  `tests/gallery/`, and the two folders under `src/page-objects/` are a worked example against
+  a real site, not seeds. Replace them when adopting (README §"Adopting this boilerplate").
 - `artifacts/` is gitignored generated output: the human-readable summary
   `artifacts/run/summary.md` (also printed at the end of a run), the machine
   manifest `artifacts/run/manifest.json`, the redacted stage audit trail

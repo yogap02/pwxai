@@ -2,8 +2,8 @@
 %% paste into Excalidraw:  menu → Mermaid to Excalidraw
 
 flowchart LR
-    IN(["GitHub issue
-+ PR diff"])
+    IN(["a deployed change
++ its PR diff"])
 
     subgraph P1["① decide what to cover"]
         S1["1 · gap-analysis"]
@@ -23,10 +23,12 @@ flowchart LR
         S5 --> S6
     end
 
-    subgraph P4["④ repair and ship"]
+    subgraph P4["④ repair, ship and report"]
         S7["7 · heal-apply"]
         S8["8 · git"]
+        S9["9 · notify"]
         S7 --> S8
+        S8 --> S9
     end
 
     IN --> S1
@@ -35,8 +37,16 @@ flowchart LR
     S6 --> S7
     S8 --> OUT(["PR — a human reviews it,
 nothing merges itself"])
+    S9 --> CHAT(["Telegram — result, scope,
+and what the scope left out"])
+
+    S1 -. "fatal" .-> AB["abort — comments on the PR,
+reports to the chat, exits 1"]
+    S2 -. "fatal" .-> AB
 
     classDef stage fill:#F3F5F8,stroke:#DDE2E8,color:#212630
     classDef io fill:#171B23,stroke:#171B23,color:#FFFFFF
-    class S1,S2,S3,S4,S5,S6,S7,S8 stage
-    class IN,OUT io
+    classDef bad fill:#FDECEA,stroke:#C0392B,color:#7B241C
+    class S1,S2,S3,S4,S5,S6,S7,S8,S9 stage
+    class IN,OUT,CHAT io
+    class AB bad

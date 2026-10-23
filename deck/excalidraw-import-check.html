@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<!--
+  Runs the REAL importer (@excalidraw/mermaid-to-excalidraw) over the mermaid
+  blocks of a file, so "will this paste into Excalidraw?" is answered by the
+  library rather than by guessing.
+
+      python -m http.server 8765
+      open /deck/excalidraw-import-check.html?src=WORKFLOW.md
+
+  Reports, per diagram: parse ok/fail, element count, the text of every label
+  (so a literal '<br/>' is visible), and whether subgraph frames survived.
+-->
+<html lang="en">
+<head><meta charset="utf-8"><title>excalidraw import check</title></head>
+<body>
+<pre id="out">running…</pre>
+<script type="module">
+import { parseMermaidToExcalidraw } from 'https://cdn.jsdelivr.net/npm/@excalidraw/mermaid-to-excalidraw@2.2.2/+esm';
+
+const src = new URLSearchParams(location.search).get('src') || 'WORKFLOW.md';
+const out = document.getElementById('out');
+
+try {
+  const text = await (await fetch('../' + src)).text();
+  const blocks = src.endsWith('.mmd')
+    ? [text]
+    : [...text.matchAll(/```mermaid\r?\n([\s\S]*?)```/g)].map(m => m[1]);
+
+  const report = [];
+  for (let i = 0; i < blocks.length; i++) {
+    const row = { i: i + 1, ok: false };
+    try {
+      const { elements } = await parseMermaidToExcalidraw(blocks[i], {
+        themeVariables: { fontSize: '20px' },
+      });
+      row.ok = true;
+      row.elements = elements.length;
+      const types = {};
+      for (const e of elements) types[e.type] = (types[e.type] || 0) + 1;
+      row.types = types;
+      // Excalidraw 2.x puts a labelled shape's text on the shape itself
+      // (e.label.text), not in a separate text element.
+      const texts = elements
+        .flatMap(e => [e.label?.text, e.text, e.name, e.label?.rawText])
+        .filter(t => typeof t === 'string' && t.trim());
+      row.labels = texts.length;
+      row.literal_br = texts.filter(t => /<br\s*\/?>/i.test(t));
+      row.literal_entity = texts.filter(t => /&(lt|gt|amp|quot);/i.test(t));
+      row.subgraph_frames = elements.filter(e => e.type === 'frame').length;
+      row.sample = texts.slice(0, 8);
+    } catch (e) {
+      row.error = String(e && e.message || e);
+    }
+    report.push(row);
+  }
+  window.__report = report;
+} catch (e) {
+  window.__report = [{ fatal: String(e && e.message || e) }];
+}
+window.__done = true;
+out.textContent = JSON.stringify(window.__report, null, 2);
+</script>
+</body>
+</html>

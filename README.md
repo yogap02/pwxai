@@ -4,7 +4,8 @@ A reusable **pattern**, not a library. Reads an issue + diff, works out which
 areas of the app the change puts at risk, checks that risk against existing
 coverage, writes missing scenarios in plain English, turns them into specs,
 builds page objects by driving the live app, runs the suite, folds in
-locator repairs, and opens a PR. A human reviews the PR; nothing merges itself.
+locator repairs, opens a PR, and reports the run to a chat. A human reviews the
+PR; nothing merges itself.
 
 This boilerplate implements the pattern from `pipeline-pattern.md` on latest
 Playwright (1.63). See `PLAN.md` for the implementation plan and `pipeline-pattern.md`
@@ -122,10 +123,15 @@ On GitHub, `TELEGRAM_API_KEY` goes in **secrets** and `TELEGRAM_CHAT_ID` in **va
 is not a credential; a bot token is).
 
 The message carries what the summary carries, because a chat is read out of context: the source PR,
-the tier and the grep that actually ran **and what that filter left out**, the per-domain pass/fail,
-what this run wrote or could not cover, and the PR when stage 8 opened one. There is no separate
-configuration for what it says — a report that could disagree with the summary would be the same
-smaller green in another medium.
+the plan the agent chose **and who chose it**, the tier and the grep that actually ran **and what that
+filter left out**, the per-domain pass/fail, what this run wrote or could not cover, and the PR when
+stage 8 opened one. There is no separate configuration for what it says — a report that could
+disagree with the summary would be the same smaller green in another medium.
+
+The plan is stated as a decision, not a label: `Smoke testing of PR #2 — chosen by the test-plan
+agent`, followed by the agent's own reason. A `fail-open` widening prints "widened by a fallback, not
+chosen" and quotes no reason, because there is no agent sentence to quote — reporting one would put a
+decision in the agent's mouth that it never made.
 
 It opens with **two labelled statuses**, because a failed test and a broken pipeline are different
 problems and one verdict for both sends someone to fix the wrong one:
@@ -143,6 +149,25 @@ Not a verdict on the whole suite — this is the @core scope; tests outside it w
 whether the run did its job. A failed test leaves every stage `succeeded`, which is why the two never
 share a colour. The scope is named in the first line when the run was narrowed, and the line under
 it says what a narrowed pass is *not*, so `✅` can never read as "the suite is green".
+
+### A run that dies still reports
+
+Stage 9 is the *last* stage, so a run that aborts at stage 1 or 2 never reached it — the chat stayed
+silent on exactly the runs where something went wrong. The notification is therefore not downstream
+of the failure: `abortRun` persists the run record, comments on the source PR, sends its own message
+and exits.
+
+The abort message is its own template, not the normal report in another colour. A run that died has
+no scope, no result and no coverage, so printing those sections would print three lines of "nothing"
+under a shape a reader has learned to scan. It carries the two labels (`Testing Status: no test run
+was recorded`, `Pipeline Status: ❌ stage \`gap-analysis\` failed`), then **what did not happen**, then
+the tail of the stage output as evidence — the tail, because a failing stage's own error is the last
+thing it said.
+
+A comment-back failure is a returned reason rather than a swallowed `catch`: that path needs a
+permission on the product repo nothing has verified (a fine-grained token may gate `gh pr comment`
+behind *Issues: write*), so a 403 there used to mean nobody in either repo was told and no record
+said so. It is still not fatal.
 
 A message that cannot be sent **fails the stage** — non-fatal, so the run's results still stand and
 the run still exits 0 — rather than reporting a success, because a report nobody received must not
@@ -221,6 +246,18 @@ for every scenario:
 The scope vocabulary lives in `config/tiers.json`, read by the planner *and* handed
 to the agent, so there is one definition rather than a hard-coded copy per module. A
 malformed value there throws rather than defaulting.
+
+A change that touches **no product behaviour** — CI configuration, deploy scripts, docs,
+tooling — and wrote no scenario is a **deployment check**, not a wide run: what needs
+confirming is that the app came up and its main journeys work, and running the whole suite
+cannot find a behaviour change that does not exist. The prompt names that shape explicitly,
+because without it the agent chose `regression` on a CI-only PR and reported the product's
+pre-existing reds as if they were that run's news.
+
+The plan is persisted as a decision, not a label — `manifest.plan` carries the tier, the
+agent's own reason, and `source` (`planner` / `human` / `fail-open`). `smoke` reads
+identically whether the agent judged the critical paths sufficient or a fallback widened the
+run here, and a reader cannot tell a judgement from a default without it.
 
 The agent **proposes; code decides**. It returns a name and a one-line reason —
 never a `--grep` — and `src/planning/planner.ts` turns that into the filter, enforces
@@ -426,6 +463,27 @@ than widening the search.
 | 8 | `git` | skipped when nothing shippable; **refuses to ship** output that fails `typecheck`/`self-checks` |
 | 9 | `notify` | non-fatal; but a report that did not arrive **fails the stage**, so it cannot pass for a quiet success |
 
+A run that aborts at stage 1 or 2 never reaches stage 9, so it does not go unreported: `abortRun`
+persists the run record, comments on the source PR, sends its own message and exits 1. That message
+is its own template — the two status labels, what did *not* happen, and the tail of the stage output
+as evidence — never the normal report in another colour.
+
+## The workshop deck
+
+`deck/build-deck.py` builds the 10-slide "Playwright × AI" workshop deck
+(`deck/Playwright-AI-QA-Workshop.pptx`) from the same facts as these docs:
+
+```bash
+python deck/build-deck.py            # writes deck/Playwright-AI-QA-Workshop.pptx
+python deck/fit-deck.py              # do the text frames actually fit? real font metrics
+node deck/render-mermaid.mjs         # deck/diagrams/d*.png, straight out of WORKFLOW.md
+node deck/export-mermaid.mjs         # deck/diagrams/excalidraw/*.mmd, one file per diagram
+```
+
+`deck/diagrams/d1`–`d5` are the diagrams from `WORKFLOW.md` rendered to PNG for handouts and
+printing (the deck draws its own flow from shapes), so the picture and the document cannot drift;
+`deck/diagrams/excalidraw/*.mmd` are the same diagrams per file, ready to paste into Excalidraw.
+
 ## What you supply
 
 - `scenarios/<domain>.txt` — one per feature area. Plain-English blocks,
@@ -481,6 +539,17 @@ than widening the search.
   no block → classify (a handwritten test may cover it), hash moved → re-digest, hash equal
   → hold. The hash is the artifact's claim about which input built it, so it chooses the
   path — a stale block can no longer answer "already covered" with its own title.
+- **A "no" from the capability gate blocks, even when the model names nothing**: behaviour
+  that lives outside the page (a CI workflow, a deploy script) is honestly `pomCanExpress:
+  false` with an empty `missing` list, and an empty list used to read as `novel` — so stage 2
+  wrote a block that could not touch the thing the scenario was about and held it as a
+  passing test. The gate now blocks on the `false` itself, and on a `novel` verdict that
+  names no member, and the work order says what to add.
+- **A private member is not a capability**: `extractPomSurface` excludes `private` and
+  `protected` members, because the classifier is handed every extracted name and told to use
+  only those — so a private helper became an instruction to call something a spec legally
+  cannot call (TS2341, caught by the compile guard). A self-check asserts it over every page
+  object in the repo.
 - **Fail open, always**: every degraded input widens the run with a named
   reason. A malformed config value throws instead of guessing.
 - **Enforced floor**: a narrowed run still includes everything generated this run —
@@ -494,8 +563,10 @@ than widening the search.
 ## Adopting this boilerplate
 
 1. Copy the tree.
-2. Delete `scenarios/demo.txt` and `tests/demo/`. Add one scenario file per
-   feature area (lowercase filenames).
+2. Replace the sample domains. `scenarios/landing-page.txt` and `scenarios/gallery.txt`,
+   `tests/landing-page/` and `tests/gallery/`, and the two folders under
+   `src/page-objects/` are worked examples against a real site, not seeds to keep.
+   Add one scenario file per feature area (lowercase filenames).
 3. Hand-author the navigation half of `config/domain-map.json` — entry paths,
    auth flags, and the discovery steps for anything behind a listing or a
    sign-in wall. This is real investigation work, days, not configuration.
@@ -517,10 +588,11 @@ src/ai/            model client, classifier, generator, coverage backstop
 src/agent/         builder interface + write-scope guard (+ CDP stub)
 src/runtime/       self-heal fixture, heal locator, heal manifest, heal writer, viewport + layout spill
 src/planning/      tier vocabulary (tiers.json), planner agent bridge, fail-open planner
-src/stages/        01–08, wired to the orchestrator
-src/delivery/      CodeHost interface + GitHub (via gh CLI)
+src/stages/        01–09, wired to the orchestrator
+src/delivery/      CodeHost interface, GitHub (via gh CLI), PR body, Telegram report channel
 src/exploration/   BFS crawler, page analyser, journal, locator writer
-src/cli/           run-pipeline, self-checks
+src/cli/           run-pipeline, run-stage, self-checks
 src/page-objects/  one folder per domain: POM (index.ts) + instruction.md
 tests/<domain>/    generated + handwritten specs side-by-side
+deck/              the workshop deck (build-deck.py) + diagrams rendered from WORKFLOW.md
 ```

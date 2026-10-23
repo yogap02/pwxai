@@ -58,6 +58,16 @@ Stages 1 and 2 are fatal because they are the ones that decide *what to cover*. 
 them degrades: a page object that failed to build leaves a marked block, a test that failed stays
 failed in the report, a heal that did not apply is still active at runtime next run.
 
+**A fatal stage must not go unreported, and the report stage is downstream of it.** This is the one
+structural consequence of putting the report channel last: a run that aborts at stage 1 or 2 never
+reaches stage 9, so the chat would stay silent on exactly the runs where something went wrong — and
+the only other channel is a comment on the product's PR, which needs a permission nobody has
+verified. So the abort reports *itself*: persist the run record, comment, send, exit 1, in that
+order. The abort message is a separate template, because a run that died has no scope, no result and
+no coverage to report, and printing those sections would print three lines of "nothing" under a
+shape a reader has learned to scan. Any pipeline that puts its notification last has this bug until
+it is fixed this way.
+
 ---
 
 ## 3. Why it works — the decisions that transfer

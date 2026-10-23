@@ -1,16 +1,16 @@
 # The workflow, as diagrams
 
-The pipeline has one end-to-end flow and three decisions that are worth
+The pipeline has one end-to-end flow and four decisions that are worth
 understanding on their own. The diagrams below are [Mermaid](https://mermaid.js.org)
 source, so they render in GitHub, in VS Code, and in any Markdown viewer with
 Mermaid support.
 
 `deck/build-deck.py` renders the workshop deck, whose stage slide shows the same
-flow; `deck/diagrams/d*.png` are these diagrams rendered to PNG for slides and
-handouts, generated straight from this file:
+flow; `deck/diagrams/d*.png` are these diagrams rendered to PNG for handouts and
+printing, generated straight from this file (`d1`–`d5` below, in order):
 
 ```bash
-node artifacts/render-mermaid.mjs      # needs: npx playwright install chromium
+node deck/render-mermaid.mjs      # needs: npx playwright install chromium
 ```
 
 ## Exporting to Excalidraw
@@ -19,7 +19,7 @@ node artifacts/render-mermaid.mjs      # needs: npx playwright install chromium
 Excalidraw (*menu → Mermaid to Excalidraw*). Regenerate them from this file:
 
 ```bash
-node artifacts/export-mermaid.mjs
+node deck/export-mermaid.mjs
 ```
 
 Three things about that import — **checked against Excalidraw's own importer**
@@ -32,17 +32,17 @@ Three things about that import — **checked against Excalidraw's own importer**
 | `subgraph` | imports, but as a plain rectangle carrying the group's label — Excalidraw groups are not elements, so the phase label arrives as text you can move rather than a group you can drag. |
 
 `subgraph` and `classDef` are kept in the export for exactly those reasons; only the
-line breaks are rewritten. The check itself is `artifacts/excalidraw-import-check.html`
+line breaks are rewritten. The check itself is `deck/excalidraw-import-check.html`
 (serve the repo root and open it with `?src=<file>`) — it reports per diagram the
 parse result, the element types, every label text, and any surviving `<br>`.
 
 ---
 
-## 1. End to end: an issue in, a reviewed PR out
+## 1. End to end: a deployment in, a reviewed PR out
 
 ```mermaid
 flowchart LR
-    IN(["GitHub issue<br/>+ PR diff"])
+    IN(["a deployed change<br/>+ its PR diff"])
 
     subgraph P1["① decide what to cover"]
         S1["1 · gap-analysis"]
@@ -77,10 +77,15 @@ flowchart LR
     S8 --> OUT(["PR — a human reviews it,<br/>nothing merges itself"])
     S9 --> CHAT(["Telegram — result, scope,<br/>and what the scope left out"])
 
+    S1 -. "fatal" .-> AB["abort — comments on the PR,<br/>reports to the chat, exits 1"]
+    S2 -. "fatal" .-> AB
+
     classDef stage fill:#F3F5F8,stroke:#DDE2E8,color:#212630
     classDef io fill:#171B23,stroke:#171B23,color:#FFFFFF
+    classDef bad fill:#FDECEA,stroke:#C0392B,color:#7B241C
     class S1,S2,S3,S4,S5,S6,S7,S8,S9 stage
     class IN,OUT,CHAT io
+    class AB bad
 ```
 
 **How to read it.** What passes between phases is *files on disk*, not conversation
@@ -95,6 +100,13 @@ running the rest on a wrong plan wastes the run. Stages 3–7 record a failure a
 run continues, so one pass gives you the whole picture. Stage 8 is skipped when there
 is nothing shippable. Stage 9 tells the chat, and is non-fatal too — but a report that
 did not arrive *fails that stage*, so it can never pass for a quiet success.
+
+**A run that dies still reports.** Because stage 9 is the *last* stage, an abort at
+stage 1 or 2 would never reach it — the chat would stay silent on exactly the runs where
+something went wrong. So the notification is not downstream of the failure: `abortRun`
+persists the run record, comments on the source PR, sends its own message, and exits.
+The abort message is a different template, not the normal report in another colour — see
+§5.
 
 ---
 
@@ -116,7 +128,7 @@ flowchart TD
     GEN --> WRITE["written inside<br/>// @digest:managed:start … end"]
 
     classDef gate fill:#FFF6E5,stroke:#B46A00,color:#212630
-    classDef ok fill:#E8F5E9,stroke:#2EAD33,color:#1E7A22
+    classDef ok fill:#E6F6FB,stroke:#43B7DC,color:#145E77
     class H,CLS gate
     class HOLD,COV,UNB,GEN,WRITE ok
 ```
@@ -150,7 +162,7 @@ flowchart TD
 
     classDef gate fill:#FFF6E5,stroke:#B46A00,color:#212630
     classDef bad fill:#FDECEA,stroke:#C0392B,color:#7B241C
-    classDef good fill:#E8F5E9,stroke:#2EAD33,color:#1E7A22
+    classDef good fill:#E6F6FB,stroke:#43B7DC,color:#145E77
     class Q,N,CP,LC,T gate
     class R1,R2,R3,D bad
     class CAND,W good
@@ -216,6 +228,51 @@ empty change set.
 A CI run can also tell the two apart. An override that arrived from somewhere other than a
 run-time input is named as a *leftover* rather than accepted as a decision — the same silent
 smaller-green, one layer up.
+
+---
+
+## 5. The report channel: two statuses, and a run that died
+
+Two things a report must never do: report a tick for a run that did not look, and go quiet
+on the runs where something went wrong.
+
+```mermaid
+flowchart TD
+    R["a run finishes,<br/>or dies at stage 1–2"] --> A{"did it reach<br/>the end?"}
+    A -- "aborted" --> AB["abortRun<br/>persist · comment · report · exit 1"]
+    A -- "completed" --> S9["9 · notify<br/>build the report from the manifest"]
+    S9 --> Q{"was a channel<br/>configured?"}
+    Q -- "no" --> NONE["says so, sends nothing<br/>a legitimate setup, not a defect"]
+    Q -- "yes" --> SEND{"did it send?"}
+    SEND -- "yes" --> OK["Testing Status · Pipeline Status<br/>+ the scope, and what it left out"]
+    SEND -- "no" --> FAIL["stage FAILS — non-fatal<br/>the results still stand, the send does not pass"]
+    AB --> ABORT["its own template:<br/>what did NOT happen, then the tail<br/>of the stage output"]
+
+    classDef gate fill:#FFF6E5,stroke:#B46A00,color:#212630
+    classDef bad fill:#FDECEA,stroke:#C0392B,color:#7B241C
+    classDef good fill:#E6F6FB,stroke:#43B7DC,color:#145E77
+    class A,Q,SEND gate
+    class AB,FAIL,ABORT bad
+    class OK,NONE good
+```
+
+**Two statuses, never folded into one.** `Testing Status` is the product — what the browser
+run found. `Pipeline Status` is the process — whether the run did its job. A failed test
+leaves every stage `succeeded`, so one combined colour reads a red suite as a broken
+pipeline and a broken pipeline as a red suite, and both send someone to fix the wrong one.
+
+**The plan is stated as a decision.** `manifest.plan` carries the tier, the agent's own
+reason and `source` (`planner` / `human` / `fail-open`), and the report renders it as a
+sentence — *Smoke testing of PR #2 — chosen by the test-plan agent*, then the reason. A
+fallback that widened the run says "widened by a fallback, not chosen" and quotes nothing,
+because there is no agent sentence to quote and inventing one would put a decision in the
+agent's mouth that it never made.
+
+**The abort message is not the report in another colour.** A run that died has no scope, no
+result and no coverage; printing those sections would print three lines of "nothing" under a
+shape a reader has learned to scan. It carries the two labels, then what did *not* happen,
+then the tail of the stage output — the tail, because a failing stage's own error is the
+last thing it said.
 
 ---
 

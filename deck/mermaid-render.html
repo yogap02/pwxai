@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<!--
+  Renders every ```mermaid block in WORKFLOW.md to an SVG in the page, so each
+  diagram can be screenshotted to PNG for the deck.
+
+  Serve the repo root, then open /deck/mermaid-render.html?w=2400 :
+      python -m http.server 8765
+  The page sets window.__done = true and window.__result = [{id,w,h,viewBox}]
+  when every diagram has rendered. Reading the source out of WORKFLOW.md is the
+  point: the image and the doc cannot drift.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>mermaid render — WORKFLOW.md</title>
+<style>
+  body { margin: 0; padding: 24px; background: #fff;
+         font-family: "Segoe UI", system-ui, sans-serif; }
+  .diagram { background: #fff; padding: 8px; margin-bottom: 28px; }
+  .diagram svg { max-width: 100%; height: auto; }
+  #err { color: #b00020; font: 14px Consolas, monospace; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<div id="out"></div>
+<div id="err"></div>
+<script type="module">
+import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+
+const width = Number(new URLSearchParams(location.search).get('w') || 2400);
+
+mermaid.initialize({
+  startOnLoad: false,
+  theme: 'neutral',
+  themeVariables: {
+    fontFamily: '"Segoe UI", system-ui, sans-serif',
+    fontSize: '17px',
+    lineColor: '#6B7280',
+  },
+  flowchart: { htmlLabels: true, curve: 'basis', padding: 12, nodeSpacing: 45, rankSpacing: 60 },
+});
+
+try {
+  const md = await (await fetch('../WORKFLOW.md')).text();
+  const blocks = [...md.matchAll(/```mermaid\r?\n([\s\S]*?)```/g)].map(m => m[1]);
+  if (!blocks.length) throw new Error('no ```mermaid blocks found in WORKFLOW.md');
+
+  const out = document.getElementById('out');
+  const result = [];
+  for (let i = 0; i < blocks.length; i++) {
+    const wrap = document.createElement('div');
+    wrap.className = 'diagram';
+    wrap.id = 'd' + (i + 1);
+    wrap.style.width = width + 'px';
+    const pre = document.createElement('pre');
+    pre.className = 'mermaid';
+    pre.textContent = blocks[i];
+    wrap.appendChild(pre);
+    out.appendChild(wrap);
+    await mermaid.run({ nodes: [pre] });
+    const r = wrap.getBoundingClientRect();
+    result.push({
+      id: wrap.id,
+      w: Math.round(r.width),
+      h: Math.round(r.height),
+      viewBox: wrap.querySelector('svg')?.getAttribute('viewBox') || null,
+    });
+  }
+  window.__result = result;
+  window.__done = true;
+} catch (e) {
+  document.getElementById('err').textContent = String(e && e.stack || e);
+  window.__error = String(e);
+  window.__done = true;
+}
+</script>
+</body>
+</html>

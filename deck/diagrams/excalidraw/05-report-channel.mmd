@@ -1,0 +1,30 @@
+%% 05-report-channel — exported from WORKFLOW.md
+%% paste into Excalidraw:  menu → Mermaid to Excalidraw
+
+flowchart TD
+    R["a run finishes,
+or dies at stage 1–2"] --> A{"did it reach
+the end?"}
+    A -- "aborted" --> AB["abortRun
+persist · comment · report · exit 1"]
+    A -- "completed" --> S9["9 · notify
+build the report from the manifest"]
+    S9 --> Q{"was a channel
+configured?"}
+    Q -- "no" --> NONE["says so, sends nothing
+a legitimate setup, not a defect"]
+    Q -- "yes" --> SEND{"did it send?"}
+    SEND -- "yes" --> OK["Testing Status · Pipeline Status
++ the scope, and what it left out"]
+    SEND -- "no" --> FAIL["stage FAILS — non-fatal
+the results still stand, the send does not pass"]
+    AB --> ABORT["its own template:
+what did NOT happen, then the tail
+of the stage output"]
+
+    classDef gate fill:#FFF6E5,stroke:#B46A00,color:#212630
+    classDef bad fill:#FDECEA,stroke:#C0392B,color:#7B241C
+    classDef good fill:#E6F6FB,stroke:#43B7DC,color:#145E77
+    class A,Q,SEND gate
+    class AB,FAIL,ABORT bad
+    class OK,NONE good
